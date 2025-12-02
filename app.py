@@ -9,7 +9,50 @@ from io import StringIO  # for CSV template generation (not strictly required bu
 # =========================
 st.set_page_config(page_title="BMS + Cell Analyzer", layout="wide")
 
+# =========================
+# Simple login using Streamlit secrets
+# =========================
+def login():
+    # Initialize session state
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in = False
+
+    # If already logged in, just return
+    if st.session_state.logged_in:
+        return
+
+    st.title("🔒 BMS Analyzer Login")
+
+    with st.form("login_form"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        submit = st.form_submit_button("Login")
+
+    if submit:
+        correct_user = st.secrets.get("APP_USERNAME", "")
+        correct_pass = st.secrets.get("APP_PASSWORD", "")
+
+        if username == correct_user and password == correct_pass:
+            st.session_state.logged_in = True
+            st.success("Login successful. Loading app...")
+        else:
+            st.error("Invalid username or password.")
+
+    # If not logged in yet, stop the app here
+    if not st.session_state.logged_in:
+        st.stop()
+
+# Call login before showing the main app
+login()
+
+# =========================
+# Main app starts here
+# =========================
 st.title("🔋 BMS + 🧩 Cell-Level Analyzer")
+st.write(
+    "This app lets you analyze **pack-level BMS logs** and **cell-level rack data** "
+    "in one place. Upload both files in the sidebar."
+)
 st.write(
     "This app lets you analyze **pack-level BMS logs** and **cell-level rack data** "
     "in one place. Upload both files in the sidebar."
