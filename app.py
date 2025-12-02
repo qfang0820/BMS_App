@@ -21,7 +21,7 @@ def login():
     if st.session_state.logged_in:
         return
 
-    st.title("🔒 BMS Analyzer Login")
+    st.title("BMS Analyzer Login")
 
     with st.form("login_form"):
         username = st.text_input("Username")
@@ -48,7 +48,7 @@ login()
 # =========================
 # Main app starts here
 # =========================
-st.title("🔋 BMS + 🧩 Cell-Level Analyzer")
+st.title(" BMS + Cell-Level Analyzer")
 st.write(
     "This app lets you analyze **pack-level BMS logs** and **cell-level rack data** "
     "in one place. Upload both files in the sidebar."
@@ -61,7 +61,7 @@ st.write(
 # =========================
 # Downloadable templates
 # =========================
-st.markdown("### 📥 Download sample upload templates")
+st.markdown("### Download sample upload templates")
 
 # ---- BMS template (raw units like your real files) ----
 bms_template = pd.DataFrame(
@@ -287,11 +287,11 @@ if cell_file is not None:
 # Tabs
 # =========================
 tab_bms_overview, tab_bms_events, tab_bms_summary, tab_bms_energy, tab_cells = st.tabs(
-    ["📊 BMS Overview", "🚨 BMS Events", "📝 BMS Summary", "⚡ BMS Energy", "🧩 Cell Detail"]
+    ["BMS Overview", "BMS Events", "BMS Summary", "BMS Energy", "Cell Detail"]
 )
 
 # =================================================================
-# 📊 BMS OVERVIEW TAB
+# BMS OVERVIEW TAB
 # =================================================================
 with tab_bms_overview:
     st.subheader("BMS Pack-Level Overview")
@@ -426,7 +426,7 @@ with tab_bms_overview:
         st.plotly_chart(fig_soc, use_container_width=True)
 
 # =================================================================
-# 🚨 BMS EVENTS TAB
+# BMS EVENTS TAB
 # =================================================================
 with tab_bms_events:
     st.subheader("BMS Events (Low Cell / Low SoC / High Delta)")
@@ -511,7 +511,7 @@ with tab_bms_events:
             )
 
 # =================================================================
-# 📝 BMS SUMMARY TAB
+# BMS SUMMARY TAB
 # =================================================================
 with tab_bms_summary:
     st.subheader("Auto-Generated BMS Summary")
@@ -609,7 +609,7 @@ with tab_bms_summary:
         )
 
 # =================================================================
-# ⚡ BMS ENERGY TAB
+# BMS ENERGY TAB
 # =================================================================
 with tab_bms_energy:
     st.subheader("Energy In / Out (from BMS log)")
@@ -882,7 +882,7 @@ with tab_bms_energy:
                     )
 
 # =================================================================
-# 🧩 CELL DETAIL TAB
+# CELL DETAIL TAB
 # =================================================================
 with tab_cells:
     st.subheader("Cell-Level Detail by Rack")
