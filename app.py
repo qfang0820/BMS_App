@@ -1367,38 +1367,3 @@ with tab_cells:
                 "Min / Max are taken over the **entire file** (all timestamps) per rack. "
                 "Min/Max time shows when that extreme cell voltage occurred."
             )
-
-            # ===== Plot section stays the same, just moved after stats =====
-            racks = ["All Racks"] + sorted(df_cells_time["Rack"].unique())
-            selected_rack = st.selectbox(
-                "Select rack for time-series plot",
-                racks,
-                key="ts_rack_sel",
-            )
-
-            df_plot = df_cells_time
-            if selected_rack != "All Racks":
-                df_plot = df_plot[df_plot["Rack"] == selected_rack]
-
-            st.write(
-                f"Plotting **{df_plot['CellID'].nunique()} cells**, "
-                f"{df_plot.shape[0]:,} points for {selected_rack}."
-            )
-
-            fig_ts = px.line(
-                df_plot,
-                x="Time",
-                y="Voltage_V",
-                color="CellID",
-                line_group="CellID",
-                title=f"Cell Voltages vs Time ({selected_rack})",
-                render_mode="webgl",
-            )
-            fig_ts.update_layout(
-                height=700,
-                xaxis_title="Time",
-                yaxis_title="Cell Voltage (V)",
-                legend_title="Cell",
-            )
-            st.plotly_chart(fig_ts, use_container_width=True)
-
