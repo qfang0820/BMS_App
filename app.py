@@ -649,6 +649,115 @@ with tab_bms_energy:
                             }
                         ).head(200)
                     )
+                                    # -------------------------------------------------
+                # Theoretical container energy from cell specs
+                # -------------------------------------------------
+                st.markdown("---")
+                st.subheader("Theoretical Container Energy from Cell Specs")
+
+                st.markdown(
+                    "This section estimates potential container energy using:\n"
+                    "- Cell Ah rating\n"
+                    "- Charge cutoff **3.6 V** and discharge cutoff **2.7 V** per cell\n"
+                    "- Number of cells in series per string\n"
+                    "- Number of parallel strings / racks\n\n"
+                    "It assumes a simple linear model: "
+                    "`Energy ≈ Ah × (V_charge_cutoff − V_discharge_cutoff) × (total cells) / 1000`."
+                )
+
+                # User inputs
+                cell_Ah = st.number_input(
+                    "Cell capacity (Ah)",
+                    min_value=0.1,
+                    max_value=2000.0,
+                    value=280.0,
+                    step=10.0,
+                    help="Nameplate Ah rating of one cell",
+                    key="energy_cell_Ah",
+                )
+
+                cells_per_string = st.number_input(
+                    "Cells in series per string",
+                    min_value=1,
+                    max_value=2000,
+                    value=396,
+                    step=1,
+                    help="For example: 396 cells in series in one rack/string",
+                    key="energy_cells_per_string",
+                )
+
+                num_strings = st.number_input(
+                    "Number of parallel strings / racks",
+                    min_value=1,
+                    max_value=100,
+                    value=4,
+                    step=1,
+                    help="For example: number of racks tied in parallel on the DC bus",
+                    key="energy_num_strings",
+                )
+
+                charge_cutoff = st.number_input(
+                    "Charge cutoff voltage per cell (V)",
+                    min_value=0.0,
+                    max_value=10.0,
+                    value=3.6,
+                    step=0.01,
+                    key="energy_charge_cutoff",
+                )
+
+                discharge_cutoff = st.number_input(
+                    "Discharge cutoff voltage per cell (V)",
+                    min_value=0.0,
+                    max_value=10.0,
+                    value=2.7,
+                    step=0.01,
+                    key="energy_discharge_cutoff",
+                )
+
+                weak_cells = st.number_input(
+                    "Number of weak cells to bypass/remove",
+                    min_value=0,
+                    max_value=1000,
+                    value=1,
+                    step=1,
+                    help="If one cell is weak and effectively removed from the usable stack.",
+                    key="energy_weak_cells",
+                )
+
+                # Compute theoretical energies
+                dv_cell = max(charge_cutoff - discharge_cutoff, 0.0)
+                total_cells = cells_per_string * num_strings
+                effective_cells = max(total_cells - weak_cells, 0)
+
+                if dv_cell <= 0 or cell_Ah <= 0 or total_cells <= 0:
+                    st.warning("Please enter positive values for cell Ah, cell count, and ensure charge cutoff > discharge cutoff.")
+                else:
+                    full_energy_kWh = cell_Ah * dv_cell * total_cells / 1000.0
+                    weak_energy_kWh = cell_Ah * dv_cell * effective_cells / 1000.0
+
+                    shortfall_kWh = full_energy_kWh - weak_energy_kWh
+                    shortfall_pct = (shortfall_kWh / full_energy_kWh * 100.0) if full_energy_kWh > 0 else 0.0
+
+                    cE1, cE2, cE3 = st.columns(3)
+                    cE1.metric(
+                        "Full theoretical energy (all cells healthy)",
+                        f"{full_energy_kWh:.1f} kWh",
+                    )
+                    cE2.metric(
+                        "Energy if weak cell(s) removed",
+                        f"{weak_energy_kWh:.1f} kWh",
+                    )
+                    cE3.metric(
+                        "Shortfall vs full design",
+                        f"{shortfall_kWh:.1f} kWh ({shortfall_pct:.1f} %)",
+                    )
+
+                    st.caption(
+                        "This is a first-order estimate based on cell Ah and cutoff voltages. "
+                        "It does **not** account for detailed cell OCV curves or rate effects, "
+                        "but it’s useful to quantify how much one weak cell (or a few) reduce "
+                        "the container’s theoretical energy."
+                    )
 
 # =================================================================
 # 🧩 CELL DETAIL TAB
