@@ -1170,59 +1170,7 @@ with tab_cells:
                 f"{df_cells_all['Rack'].nunique()} racks."
             )
 
-            st.subheader("Per-Rack Statistics (Snapshot)")
-
-            grp = df_cells_all.groupby("Rack")
-            avg_v = grp["__cell_v__"].mean().rename("Avg_Cell_V")
-            delta_v = (grp["__cell_v__"].max() - grp["__cell_v__"].min()).rename("Cell_V_Delta")
-            idx_min = grp["__cell_v__"].idxmin()
-            idx_max = grp["__cell_v__"].idxmax()
-
-            df_min = (
-                df_cells_all.loc[idx_min, ["Rack", "CellID", "__cell_v__"]]
-                .rename(columns={"CellID": "Min_Cell_ID", "__cell_v__": "Min_Cell_V"})
-            )
-            df_max = (
-                df_cells_all.loc[idx_max, ["Rack", "CellID", "__cell_v__"]]
-                .rename(columns={"CellID": "Max_Cell_ID", "__cell_v__": "Max_Cell_V"})
-            )
-
-            rack_stats = (
-                avg_v.to_frame()
-                .join(delta_v)
-                .reset_index()
-                .merge(df_min, on="Rack")
-                .merge(df_max, on="Rack")
-            )
-
-            rack_stats = rack_stats[
-                [
-                    "Rack",
-                    "Min_Cell_ID",
-                    "Min_Cell_V",
-                    "Max_Cell_ID",
-                    "Max_Cell_V",
-                    "Avg_Cell_V",
-                    "Cell_V_Delta",
-                ]
-            ]
-
-            st.dataframe(
-                rack_stats.style.format(
-                    {
-                        "Min_Cell_V": "{:.3f}",
-                        "Max_Cell_V": "{:.3f}",
-                        "Avg_Cell_V": "{:.3f}",
-                        "Cell_V_Delta": "{:.3f}",
-                    }
-                )
-            )
-            st.caption(
-                "Shows lowest cell (ID & voltage), highest cell (ID & voltage), "
-                "average cell voltage, and cell V delta (Max - Min) per rack."
-            )
-
-        # ----- Time series: V vs time -----
+                   # ----- Time series: V vs time -----
         st.subheader("📈 All Cells: V vs Time")
 
         if not time_series_list:
@@ -1233,6 +1181,78 @@ with tab_cells:
         else:
             df_cells_time = pd.concat(time_series_list, ignore_index=True)
 
+            # ===== New: Per-rack stats over the ENTIRE file =====
+            st.subheader("Per-Rack Statistics (Full Time Range)")
+
+            grp_ts = df_cells_time.groupby("Rack")
+
+            # Average and delta over whole time series
+            avg_v = grp_ts["Voltage_V"].mean().rename("Avg_Cell_V")
+            delta_v = (grp_ts["Voltage_V"].max() - grp_ts["Voltage_V"].min()).rename("Cell_V_Delta")
+
+            # Index of min and max Voltage_V per rack over full dataset
+            idx_min = grp_ts["Voltage_V"].idxmin()
+            idx_max = grp_ts["Voltage_V"].idxmax()
+
+            df_min = (
+                df_cells_time.loc[idx_min, ["Rack", "CellID", "Time", "Voltage_V"]]
+                .rename(
+                    columns={
+                        "CellID": "Min_Cell_ID",
+                        "Time": "Min_Time",
+                        "Voltage_V": "Min_Cell_V",
+                    }
+                )
+            )
+            df_max = (
+                df_cells_time.loc[idx_max, ["Rack", "CellID", "Time", "Voltage_V"]]
+                .rename(
+                    columns={
+                        "CellID": "Max_Cell_ID",
+                        "Time": "Max_Time",
+                        "Voltage_V": "Max_Cell_V",
+                    }
+                )
+            )
+
+            rack_stats_full = (
+                avg_v.to_frame()
+                .join(delta_v)
+                .reset_index()
+                .merge(df_min, on="Rack")
+                .merge(df_max, on="Rack")
+            )
+
+            rack_stats_full = rack_stats_full[
+                [
+                    "Rack",
+                    "Min_Cell_ID",
+                    "Min_Cell_V",
+                    "Min_Time",
+                    "Max_Cell_ID",
+                    "Max_Cell_V",
+                    "Max_Time",
+                    "Avg_Cell_V",
+                    "Cell_V_Delta",
+                ]
+            ]
+
+            st.dataframe(
+                rack_stats_full.style.format(
+                    {
+                        "Min_Cell_V": "{:.3f}",
+                        "Max_Cell_V": "{:.3f}",
+                        "Avg_Cell_V": "{:.3f}",
+                        "Cell_V_Delta": "{:.3f}",
+                    }
+                )
+            )
+            st.caption(
+                "Min / Max are taken over the **entire file** (all timestamps) per rack. "
+                "Min/Max time shows when that extreme cell voltage occurred."
+            )
+
+            # ===== Plot section stays the same, just moved after stats =====
             racks = ["All Racks"] + sorted(df_cells_time["Rack"].unique())
             selected_rack = st.selectbox(
                 "Select rack for time-series plot",
@@ -1265,3 +1285,120 @@ with tab_cells:
                 legend_title="Cell",
             )
             st.plotly_chart(fig_ts, use_container_width=True)
+
+              # ----- Time series: V vs time -----
+        st.subheader("📈 All Cells: V vs Time")
+
+        if not time_series_list:
+            st.info(
+                "Upload rack files with a valid 'Time' (first row) + 'Serial number' + V1..Vn "
+                "to see V vs Time plots."
+            )
+        else:
+            df_cells_time = pd.concat(time_series_list, ignore_index=True)
+
+            # ===== New: Per-rack stats over the ENTIRE file =====
+            st.subheader("Per-Rack Statistics (Full Time Range)")
+
+            grp_ts = df_cells_time.groupby("Rack")
+
+            # Average and delta over whole time series
+            avg_v = grp_ts["Voltage_V"].mean().rename("Avg_Cell_V")
+            delta_v = (grp_ts["Voltage_V"].max() - grp_ts["Voltage_V"].min()).rename("Cell_V_Delta")
+
+            # Index of min and max Voltage_V per rack over full dataset
+            idx_min = grp_ts["Voltage_V"].idxmin()
+            idx_max = grp_ts["Voltage_V"].idxmax()
+
+            df_min = (
+                df_cells_time.loc[idx_min, ["Rack", "CellID", "Time", "Voltage_V"]]
+                .rename(
+                    columns={
+                        "CellID": "Min_Cell_ID",
+                        "Time": "Min_Time",
+                        "Voltage_V": "Min_Cell_V",
+                    }
+                )
+            )
+            df_max = (
+                df_cells_time.loc[idx_max, ["Rack", "CellID", "Time", "Voltage_V"]]
+                .rename(
+                    columns={
+                        "CellID": "Max_Cell_ID",
+                        "Time": "Max_Time",
+                        "Voltage_V": "Max_Cell_V",
+                    }
+                )
+            )
+
+            rack_stats_full = (
+                avg_v.to_frame()
+                .join(delta_v)
+                .reset_index()
+                .merge(df_min, on="Rack")
+                .merge(df_max, on="Rack")
+            )
+
+            rack_stats_full = rack_stats_full[
+                [
+                    "Rack",
+                    "Min_Cell_ID",
+                    "Min_Cell_V",
+                    "Min_Time",
+                    "Max_Cell_ID",
+                    "Max_Cell_V",
+                    "Max_Time",
+                    "Avg_Cell_V",
+                    "Cell_V_Delta",
+                ]
+            ]
+
+            st.dataframe(
+                rack_stats_full.style.format(
+                    {
+                        "Min_Cell_V": "{:.3f}",
+                        "Max_Cell_V": "{:.3f}",
+                        "Avg_Cell_V": "{:.3f}",
+                        "Cell_V_Delta": "{:.3f}",
+                    }
+                )
+            )
+            st.caption(
+                "Min / Max are taken over the **entire file** (all timestamps) per rack. "
+                "Min/Max time shows when that extreme cell voltage occurred."
+            )
+
+            # ===== Plot section stays the same, just moved after stats =====
+            racks = ["All Racks"] + sorted(df_cells_time["Rack"].unique())
+            selected_rack = st.selectbox(
+                "Select rack for time-series plot",
+                racks,
+                key="ts_rack_sel",
+            )
+
+            df_plot = df_cells_time
+            if selected_rack != "All Racks":
+                df_plot = df_plot[df_plot["Rack"] == selected_rack]
+
+            st.write(
+                f"Plotting **{df_plot['CellID'].nunique()} cells**, "
+                f"{df_plot.shape[0]:,} points for {selected_rack}."
+            )
+
+            fig_ts = px.line(
+                df_plot,
+                x="Time",
+                y="Voltage_V",
+                color="CellID",
+                line_group="CellID",
+                title=f"Cell Voltages vs Time ({selected_rack})",
+                render_mode="webgl",
+            )
+            fig_ts.update_layout(
+                height=700,
+                xaxis_title="Time",
+                yaxis_title="Cell Voltage (V)",
+                legend_title="Cell",
+            )
+            st.plotly_chart(fig_ts, use_container_width=True)
+
