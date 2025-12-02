@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
-from io import StringIO  # for CSV template generation
+from io import StringIO  # for CSV template generation (not strictly required but ok)
 
 # =========================
 # Page setup
@@ -55,31 +55,25 @@ bms_template = pd.DataFrame(
         },
     ]
 )
-
 bms_template_csv = bms_template.to_csv(index=False)
 
 # ---- Cell rack template (Time, Serial number, V1..V396, in mV) ----
 cell_cols = ["Time", "Serial number"] + [f"V{i}" for i in range(1, 397)]
-
 cell_rows = []
 
-# First row: real timestamp + base serial
 base_time_str = "2025-11-11 10:00:00"
 base_serial = 5613
 
 row0 = {"Time": base_time_str, "Serial number": base_serial}
 for i in range(1, 397):
-    # example: around 3.35 V => 3350 mV
     row0[f"V{i}"] = 3350
 cell_rows.append(row0)
 
-# Second row: Time = "None", serial+1, voltages slightly lower
 row1 = {"Time": "None", "Serial number": base_serial + 1}
 for i in range(1, 397):
     row1[f"V{i}"] = 3348
 cell_rows.append(row1)
 
-# Third row: Time = "None", serial+2, voltages slightly lower again
 row2 = {"Time": "None", "Serial number": base_serial + 2}
 for i in range(1, 397):
     row2[f"V{i}"] = 3345
@@ -649,30 +643,28 @@ with tab_bms_energy:
                             }
                         ).head(200)
                     )
-                                    # -------------------------------------------------
-                # Theoretical container energy from cell specs
+
+                # -------------------------------------------------
+                # Theoretical container energy from LFP cell specs
                 # -------------------------------------------------
                 st.markdown("---")
-                st.subheader("Theoretical Container Energy from Cell Specs")
+                st.subheader("Theoretical Container Energy (LFP OCV Model)")
 
                 st.markdown(
-                    "This section estimates potential container energy using:\n"
-                    "- Cell Ah rating\n"
-                    "- Charge cutoff **3.6 V** and discharge cutoff **2.7 V** per cell\n"
-                    "- Number of cells in series per string\n"
-                    "- Number of parallel strings / racks\n\n"
-                    "It assumes a simple linear model: "
-                    "`Energy ≈ Ah × (V_charge_cutoff − V_discharge_cutoff) × (total cells) / 1000`."
+                    "This estimate uses an approximate **LFP OCV vs SoC curve**, your cell Ah rating, "
+                    "and per-cell voltage cutoffs (2.7–3.6 V by default). "
+                    "It integrates the OCV curve between the implied SoC limits, "
+                    "instead of assuming a simple linear voltage model."
                 )
 
-                # User inputs
+                # ---- User inputs ----
                 cell_Ah = st.number_input(
                     "Cell capacity (Ah)",
                     min_value=0.1,
                     max_value=2000.0,
                     value=280.0,
                     step=10.0,
-                    help="Nameplate Ah rating of one cell",
+                    help="Nameplate Ah rating of one LFP cell",
                     key="energy_cell_Ah",
                 )
 
@@ -720,23 +712,110 @@ with tab_bms_energy:
                     max_value=1000,
                     value=1,
                     step=1,
-                    help="If one cell is weak and effectively removed from the usable stack.",
+                    help="If one or more cells are effectively unusable and must be removed from the energy budget.",
                     key="energy_weak_cells",
                 )
 
-                # Compute theoretical energies
-                dv_cell = max(charge_cutoff - discharge_cutoff, 0.0)
-                total_cells = cells_per_string * num_strings
-                effective_cells = max(total_cells - weak_cells, 0)
+                # ---- Approximate LFP OCV curve (SoC in [0,1]) ----
+                # Points: (SoC, Voltage [V])
+                lfp_curve = [
+                    (0.00, 2.50),
+                    (0.05, 3.00),
+                    (0.10, 3.20),
+                    (0.20, 3.25),
+                    (0.80, 3.28),
+                    (0.90, 3.30),
+                    (0.95, 3.35),
+                    (1.00, 3.60),
+                ]
 
-                if dv_cell <= 0 or cell_Ah <= 0 or total_cells <= 0:
-                    st.warning("Please enter positive values for cell Ah, cell count, and ensure charge cutoff > discharge cutoff.")
+                def ocv_lfp(soc: float) -> float:
+                    """Piecewise-linear OCV(soc) for LFP."""
+                    if soc <= 0.0:
+                        return lfp_curve[0][1]
+                    if soc >= 1.0:
+                        return lfp_curve[-1][1]
+                    for (s1, v1), (s2, v2) in zip(lfp_curve, lfp_curve[1:]):
+                        if s1 <= soc <= s2:
+                            t = (soc - s1) / (s2 - s1)
+                            return v1 + t * (v2 - v1)
+                    return lfp_curve[-1][1]
+
+                def find_soc_for_voltage(v_target: float, steps: int = 2000):
+                    """
+                    Find SOC in [0,1] where OCV(SOC) ≈ v_target by scanning and interpolating.
+                    Returns None if not found.
+                    """
+                    s_prev = 0.0
+                    v_prev = ocv_lfp(s_prev)
+                    for i in range(1, steps + 1):
+                        s = i / steps
+                        v = ocv_lfp(s)
+                        if (v_prev - v_target) * (v - v_target) <= 0:
+                            if v == v_prev:
+                                return s
+                            t = (v_target - v_prev) / (v - v_prev)
+                            s_cross = s_prev + t * (s - s_prev)
+                            return max(0.0, min(1.0, s_cross))
+                        s_prev, v_prev = s, v
+                    return None
+
+                def integrate_ocv(soc_min: float, soc_max: float, steps: int = 1000) -> float:
+                    """
+                    Numerically integrate OCV(soc) d(soc) from soc_min to soc_max
+                    using midpoint rule. Returns ∫ V dSOC (unit: V * fraction_of_SOC).
+                    """
+                    if soc_max <= soc_min:
+                        return 0.0
+                    ds = (soc_max - soc_min) / steps
+                    total = 0.0
+                    for i in range(steps):
+                        s_mid = soc_min + (i + 0.5) * ds
+                        total += ocv_lfp(s_mid)
+                    return total * ds
+
+                # ---- Map voltage cutoffs to SOC window using OCV curve ----
+                if charge_cutoff <= discharge_cutoff:
+                    st.warning("Charge cutoff must be higher than discharge cutoff.")
+                elif cell_Ah <= 0 or cells_per_string <= 0 or num_strings <= 0:
+                    st.warning("Please enter positive values for cell Ah, cell count, and number of strings.")
                 else:
-                    full_energy_kWh = cell_Ah * dv_cell * total_cells / 1000.0
-                    weak_energy_kWh = cell_Ah * dv_cell * effective_cells / 1000.0
+                    soc_min = find_soc_for_voltage(discharge_cutoff)
+                    soc_max = find_soc_for_voltage(charge_cutoff)
+
+                    if soc_min is None:
+                        soc_min = 0.0
+                    if soc_max is None:
+                        soc_max = 1.0
+
+                    if soc_max <= soc_min:
+                        st.warning(
+                            "Could not determine a valid SOC window from the specified cutoffs "
+                            "using the LFP OCV curve. Using full 0–100% SOC as fallback."
+                        )
+                        soc_min, soc_max = 0.0, 1.0
+
+                    usable_soc_pct = (soc_max - soc_min) * 100.0
+                    integral_VdSOC = integrate_ocv(soc_min, soc_max, steps=1000)
+                    avg_voltage = integral_VdSOC / (soc_max - soc_min) if soc_max > soc_min else 0.0
+
+                    # per-cell usable energy in Wh
+                    energy_cell_Wh = cell_Ah * integral_VdSOC
+
+                    total_cells = cells_per_string * num_strings
+                    effective_cells = max(total_cells - weak_cells, 0)
+
+                    full_energy_kWh = energy_cell_Wh * total_cells / 1000.0
+                    weak_energy_kWh = energy_cell_Wh * effective_cells / 1000.0
 
                     shortfall_kWh = full_energy_kWh - weak_energy_kWh
                     shortfall_pct = (shortfall_kWh / full_energy_kWh * 100.0) if full_energy_kWh > 0 else 0.0
+
+                    st.markdown(
+                        f"Estimated usable SOC window from LFP OCV curve: **{usable_soc_pct:.1f}%** "
+                        f"({soc_min*100:.1f}% → {soc_max*100:.1f}%).  "
+                        f"Average cell voltage over this window ≈ **{avg_voltage:.3f} V**."
+                    )
 
                     cE1, cE2, cE3 = st.columns(3)
                     cE1.metric(
@@ -749,14 +828,14 @@ with tab_bms_energy:
                     )
                     cE3.metric(
                         "Shortfall vs full design",
-                        f"{shortfall_kWh:.1f} kWh ({shortfall_pct:.1f} %)",
+                        f"{shortfall_kWh:.1f} kWh ({shortfall_pct:.2f} %)",
                     )
 
                     st.caption(
-                        "This is a first-order estimate based on cell Ah and cutoff voltages. "
-                        "It does **not** account for detailed cell OCV curves or rate effects, "
-                        "but it’s useful to quantify how much one weak cell (or a few) reduce "
-                        "the container’s theoretical energy."
+                        "Based on an approximate **LFP OCV–SoC curve**, integrated between the SOC levels "
+                        "corresponding to your per-cell voltage cutoffs. "
+                        "This is still an approximation (real cells differ with temperature, rate, ageing), "
+                        "but it is more realistic than a simple linear voltage model."
                     )
 
 # =================================================================
@@ -844,7 +923,6 @@ with tab_cells:
             if df_cells.empty:
                 st.error("❌ After cleaning, there are no valid cell voltage rows.")
             else:
-                # Per-rack stats
                 st.subheader("Per-Rack Statistics")
 
                 rack_stats = (
@@ -981,7 +1059,6 @@ with tab_cells:
                     combined_cells_snap.append(snap_df)
 
             # -------- TIME SERIES: build real Time from Time + Serial number --------
-            # 1) Serial number numeric
             df_r["Serial number"] = pd.to_numeric(df_r["Serial number"], errors="coerce")
             df_r = df_r.dropna(subset=["Serial number"])
             if df_r.empty:
@@ -991,7 +1068,6 @@ with tab_cells:
                 continue
             df_r = df_r.sort_values("Serial number")
 
-            # 2) Find first valid timestamp in Time column (non-None, non-empty)
             df_r["Time_str"] = df_r["Time"].astype(str).str.strip()
             mask_valid_time = (df_r["Time_str"].str.lower() != "none") & (df_r["Time_str"] != "")
             valid_time_rows = df_r[mask_valid_time]
@@ -1014,12 +1090,10 @@ with tab_cells:
                 )
                 continue
 
-            # 3) Assume each serial step = 1 second → derive full time series
             df_r["Time_calc"] = base_time + pd.to_timedelta(
                 df_r["Serial number"] - base_serial, unit="s"
             )
 
-            # 4) Melt wide (V1..Vn) to long
             df_long = df_r.melt(
                 id_vars=["Time_calc"],
                 value_vars=v_cols,
@@ -1055,30 +1129,21 @@ with tab_cells:
 
             st.subheader("Per-Rack Statistics (Snapshot)")
 
-            # Group by rack
             grp = df_cells_all.groupby("Rack")
-
-            # Compute average and delta
             avg_v = grp["__cell_v__"].mean().rename("Avg_Cell_V")
             delta_v = (grp["__cell_v__"].max() - grp["__cell_v__"].min()).rename("Cell_V_Delta")
-
-            # Find min and max cell index per rack
             idx_min = grp["__cell_v__"].idxmin()
             idx_max = grp["__cell_v__"].idxmax()
 
-            # Build min cell dataframe
             df_min = (
                 df_cells_all.loc[idx_min, ["Rack", "CellID", "__cell_v__"]]
                 .rename(columns={"CellID": "Min_Cell_ID", "__cell_v__": "Min_Cell_V"})
             )
-
-            # Build max cell dataframe
             df_max = (
                 df_cells_all.loc[idx_max, ["Rack", "CellID", "__cell_v__"]]
                 .rename(columns={"CellID": "Max_Cell_ID", "__cell_v__": "Max_Cell_V"})
             )
 
-            # Combine into one table
             rack_stats = (
                 avg_v.to_frame()
                 .join(delta_v)
@@ -1087,7 +1152,6 @@ with tab_cells:
                 .merge(df_max, on="Rack")
             )
 
-            # Final formatting
             rack_stats = rack_stats[
                 [
                     "Rack",
@@ -1158,4 +1222,3 @@ with tab_cells:
                 legend_title="Cell",
             )
             st.plotly_chart(fig_ts, use_container_width=True)
-
