@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
+from io import StringIO  # for CSV template generation
 
 # =========================
 # Page setup
@@ -12,6 +13,102 @@ st.title("🔋 BMS + 🧩 Cell-Level Analyzer")
 st.write(
     "This app lets you analyze **pack-level BMS logs** and **cell-level rack data** "
     "in one place. Upload both files in the sidebar."
+)
+
+# =========================
+# Downloadable templates
+# =========================
+st.markdown("### 📥 Download sample upload templates")
+
+# ---- BMS template (raw units like your real files) ----
+bms_template = pd.DataFrame(
+    [
+        {
+            "Time": "2025-11-11 10:00:00",
+            "Stack voltage": 3450,      # 345.0 V after /10
+            "Stack current": -120,      # -12.0 A after /10 (discharge)
+            "SOC": 503,                 # 50.3 % after /10
+            "MAX CELL": 3350,           # 3.350 V after /1000
+            "MIN CELL": 3320,           # 3.320 V after /1000
+            "2nd MAX CELL": 3345,
+            "2nd MIN CELL": 3325,
+        },
+        {
+            "Time": "2025-11-11 10:00:10",
+            "Stack voltage": 3448,
+            "Stack current": -118,
+            "SOC": 502,
+            "MAX CELL": 3348,
+            "MIN CELL": 3318,
+            "2nd MAX CELL": 3343,
+            "2nd MIN CELL": 3323,
+        },
+        {
+            "Time": "2025-11-11 10:00:20",
+            "Stack voltage": 3445,
+            "Stack current": -115,
+            "SOC": 501,
+            "MAX CELL": 3347,
+            "MIN CELL": 3317,
+            "2nd MAX CELL": 3342,
+            "2nd MIN CELL": 3322,
+        },
+    ]
+)
+
+bms_template_csv = bms_template.to_csv(index=False)
+
+# ---- Cell rack template (Time, Serial number, V1..V396, in mV) ----
+cell_cols = ["Time", "Serial number"] + [f"V{i}" for i in range(1, 397)]
+
+cell_rows = []
+
+# First row: real timestamp + base serial
+base_time_str = "2025-11-11 10:00:00"
+base_serial = 5613
+
+row0 = {"Time": base_time_str, "Serial number": base_serial}
+for i in range(1, 397):
+    # example: around 3.35 V => 3350 mV
+    row0[f"V{i}"] = 3350
+cell_rows.append(row0)
+
+# Second row: Time = "None", serial+1, voltages slightly lower
+row1 = {"Time": "None", "Serial number": base_serial + 1}
+for i in range(1, 397):
+    row1[f"V{i}"] = 3348
+cell_rows.append(row1)
+
+# Third row: Time = "None", serial+2, voltages slightly lower again
+row2 = {"Time": "None", "Serial number": base_serial + 2}
+for i in range(1, 397):
+    row2[f"V{i}"] = 3345
+cell_rows.append(row2)
+
+cell_template = pd.DataFrame(cell_rows, columns=cell_cols)
+cell_template_csv = cell_template.to_csv(index=False)
+
+c_t1, c_t2 = st.columns(2)
+with c_t1:
+    st.download_button(
+        label="⬇ Download BMS log template (CSV)",
+        data=bms_template_csv,
+        file_name="bms_template.csv",
+        mime="text/csv",
+        key="download_bms_template",
+    )
+with c_t2:
+    st.download_button(
+        label="⬇ Download rack cell data template (CSV)",
+        data=cell_template_csv,
+        file_name="cell_record_template.csv",
+        mime="text/csv",
+        key="download_cell_template",
+    )
+
+st.caption(
+    "- BMS template uses the **raw units** your app expects: Stack V /10, Current /10, SOC /10, Cells in mV.\n"
+    "- Cell template uses `Time`, `Serial number`, and `V1..V396` in **mV** (e.g., 3350 = 3.350 V)."
 )
 
 # =========================
@@ -952,3 +1049,4 @@ with tab_cells:
                 legend_title="Cell",
             )
             st.plotly_chart(fig_ts, use_container_width=True)
+
