@@ -287,7 +287,7 @@ if cell_file is not None:
 # Tabs
 # =========================
 tab_bms_overview, tab_bms_events, tab_bms_summary, tab_bms_energy, tab_cells = st.tabs(
-    ["BMS Overview", "BMS Events", "BMS Summary", "BMS Energy", "Cell Detail"]
+    ["BMS Overview", "BMS Energy", "Cell Detail"]
 )
 
 # =================================================================
