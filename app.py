@@ -46,19 +46,6 @@ def login():
 login()
 
 # =========================
-# Main app starts here
-# =========================
-st.title(" BMS + Cell-Level Analyzer")
-st.write(
-    "This app lets you analyze **pack-level BMS logs** and **cell-level rack data** "
-    "in one place. Upload both files in the sidebar."
-)
-st.write(
-    "This app lets you analyze **pack-level BMS logs** and **cell-level rack data** "
-    "in one place. Upload both files in the sidebar."
-)
-
-# =========================
 # Downloadable templates
 # =========================
 st.markdown("### Download sample upload templates")
