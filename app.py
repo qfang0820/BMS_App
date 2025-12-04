@@ -498,13 +498,6 @@ with tab_bms_energy:
                 st.markdown("---")
                 st.subheader("Theoretical Container Energy (LFP OCV Model)")
 
-                st.markdown(
-                    "This estimate uses an approximate **LFP OCV vs SoC curve**, your cell Ah rating, "
-                    "and per-cell voltage cutoffs (2.7–3.6 V by default). "
-                    "It integrates the OCV curve between the implied SoC limits, "
-                    "instead of assuming a simple linear voltage model."
-                )
-
                 # ---- User inputs ----
                 cell_Ah = st.number_input(
                     "Cell capacity (Ah)",
