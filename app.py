@@ -324,31 +324,6 @@ with tab_bms_overview:
                 f"{df[soc_col].min():.1f} % → {df[soc_col].max():.1f} %",
             )
 
-        st.markdown("### Basic Checks")
-
-        issues = []
-        min_cell_min = df[min_cell_v_col].min()
-        soc_min = df[soc_col].min()
-        delta_max = df["cell_delta"].max()
-
-        if min_cell_min < MIN_CELL_CRIT:
-            issues.append(f"⚠️ Min cell < {MIN_CELL_CRIT:.2f} V (lowest: {min_cell_min:.3f} V).")
-
-        if soc_min < SOC_CRIT:
-            issues.append(f"⚠️ SoC < {SOC_CRIT:.1f}% (lowest: {soc_min:.1f} %).")
-
-        if delta_max > DELTA_WARN:
-            issues.append(f"⚠️ Cell delta > {DELTA_WARN:.2f} V (max: {delta_max:.3f} V).")
-
-        if not issues:
-            st.success("✅ No basic issues detected with current thresholds.")
-        else:
-            for msg in issues:
-                st.warning(msg)
-
-        st.markdown("---")
-        st.markdown("### Trends Over Time")
-
         # Stack voltage
         fig_pack = px.line(
             df,
