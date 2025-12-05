@@ -138,7 +138,7 @@ st.caption(
 # =========================
 # Sidebar uploads
 # =========================
-st.sidebar.header("Upload Data")
+st.sidebar.header("📁 Upload Data")
 
 bms_file = st.sidebar.file_uploader(
     "BMS pack-level log (.csv, .xlsx, .xls)",
@@ -323,6 +323,13 @@ with tab_bms_overview:
                 "SoC Range",
                 f"{df[soc_col].min():.1f} % → {df[soc_col].max():.1f} %",
             )
+
+        st.markdown("### Basic Checks")
+
+        issues = []
+        min_cell_min = df[min_cell_v_col].min()
+        soc_min = df[soc_col].min()
+        delta_max = df["cell_delta"].max()
 
         if min_cell_min < MIN_CELL_CRIT:
             issues.append(f"⚠️ Min cell < {MIN_CELL_CRIT:.2f} V (lowest: {min_cell_min:.3f} V).")
