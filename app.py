@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
-from io import StringIO  # for CSV template generation (not strictly required but ok)
+from io import StringIO
 
 # =========================
 # Page setup
@@ -29,12 +29,16 @@ def login():
         submit = st.form_submit_button("Login")
 
     if submit:
+        # Defaults to empty string if secrets are not set up
         correct_user = st.secrets.get("APP_USERNAME", "")
         correct_pass = st.secrets.get("APP_PASSWORD", "")
 
+        # If secrets aren't set, this might allow login with empty fields 
+        # (Change logic if you want to enforce specific hardcoded values)
         if username == correct_user and password == correct_pass:
             st.session_state.logged_in = True
             st.success("Login successful. Loading app...")
+            st.rerun() # Rerun to refresh the page and show the app
         else:
             st.error("Invalid username or password.")
 
@@ -152,12 +156,7 @@ main_page = st.sidebar.radio(
     label_visibility="collapsed",
 )
 
-# Little helper text to look like your tree:
-# 📍 Navigation
-#   ○ BMS Overview
-#         • Overview
-#         • Energy
-#   ○ Cell Detail
+# Little helper text to look like your tree
 if main_page == "BMS Overview":
     # Indented title for sub-pages
     st.sidebar.markdown("&nbsp;&nbsp;&nbsp;**BMS Overview**", unsafe_allow_html=True)
@@ -772,218 +771,6 @@ elif main_page == "Cell Detail":
         v_cols = [c for c in df_r.columns if c.upper().startswith("V")]
         if not v_cols:
             st.warning(
-                f"Rack '{rack_name}' file has no V1/V2/... columns. Skipping this file."
-            )
-            continue
-
-        v_cols = sorted(v_cols, key=cell_index)
-
-        # -------- SNAPSHOT: last valid row --------
-        df_valid = df_r.dropna(subset=v_cols, how="all")
-        if df_valid.empty:
-            st.warning(
-                f"Rack '{rack_name}' file has no valid cell readings in V1..Vn columns."
-            )
-        else:
-            last_row = df_valid.iloc[-1]
-            cell_values = last_row[v_cols].astype(float)
-
-            snap_df = pd.DataFrame(
-                {
-                    "Rack": rack_name,
-                    "CellID": [cell_index(c) for c in v_cols],
-                    "__cell_v__": cell_values.values,
-                }
-            )
-
-            if scale_mV:
-                snap_df["__cell_v__"] = snap_df["__cell_v__"] / 1000.0
-
-            snap_df["__temp__"] = None
-            snap_df = snap_df.dropna(subset=["__cell_v__"])
-            if not snap_df.empty:
-                combined_cells_snap.append(snap_df)
-
-        # -------- TIME SERIES: build real Time from Time + Serial number --------
-        df_r["Serial number"] = pd.to_numeric(df_r["Serial number"], errors="coerce")
-        df_r = df_r.dropna(subset=["Serial number"])
-        if df_r.empty:
-            st.warning(
-                f"Rack '{rack_name}': 'Serial number' column has no valid numeric data."
-            )
-            continue
-        df_r = df_r.sort_values("Serial number")
-
-        df_r["Time_str"] = df_r["Time"].astype(str).str.strip()
-        mask_valid_time = (df_r["Time_str"].str.lower() != "none") & (df_r["Time_str"] != "")
-        valid_time_rows = df_r[mask_valid_time]
-
-        if valid_time_rows.empty:
-            st.warning(
-                f"Rack '{rack_name}': 'Time' column has no valid timestamps. "
-                "Cannot build V vs time; skipping this rack."
-            )
-            continue
-
-        base_time_str = valid_time_rows["Time_str"].iloc[0]
-        base_time = pd.to_datetime(base_time_str, errors="coerce")
-        base_serial = valid_time_rows["Serial number"].iloc[0]
-
-        if pd.isna(base_time) or pd.isna(base_serial):
-            st.warning(
-                f"Rack '{rack_name}': could not parse base Time / Serial number. "
-                "Skipping this rack."
-            )
-            continue
-
-        df_r["Time_calc"] = base_time + pd.to_timedelta(
-            df_r["Serial number"] - base_serial, unit="s"
-        )
-
-        df_long = df_r.melt(
-            id_vars=["Time_calc"],
-            value_vars=v_cols,
-            var_name="CellID",
-            value_name="Voltage_mV",
-        )
-
-        df_long.rename(columns={"Time_calc": "Time"}, inplace=True)
-        df_long["Rack"] = rack_name
-        df_long["CellID"] = df_long["CellID"].str.replace("V", "").astype(int)
-
-        if scale_mV:
-            df_long["Voltage_V"] = pd.to_numeric(df_long["Voltage_mV"], errors="coerce") / 1000.0
-        else:
-            df_long["Voltage_V"] = pd.to_numeric(df_long["Voltage_mV"], errors="coerce")
-
-        df_long = df_long.dropna(subset=["Voltage_V"])
-        if not df_long.empty:
-            time_series_list.append(df_long)
-
-    # ----- Combined snapshot stats -----
-    if not combined_cells_snap:
-        st.info("No valid snapshot data found from rack files.")
-    else:
-        df_cells_all = pd.concat(combined_cells_snap, ignore_index=True)
-
-        st.subheader("Combined Cell Snapshot (Last Valid Row per Rack)")
-        st.dataframe(df_cells_all.head(50))
-        st.caption(
-            f"Total rows: {df_cells_all.shape[0]} across "
-            f"{df_cells_all['Rack'].nunique()} racks."
-        )
-
-    # ----- Time series: V vs time + full-range per-rack stats -----
-    st.subheader("📈 All Cells: V vs Time")
-
-    if not time_series_list:
-        st.info(
-            "Upload rack files with a valid 'Time' (first row) + 'Serial number' + V1..Vn "
-            "to see V vs Time plots and full-range stats."
-        )
-    else:
-        df_cells_time = pd.concat(time_series_list, ignore_index=True)
-
-        st.subheader("Per-Rack Statistics (Full Time Range)")
-
-        grp_ts = df_cells_time.groupby("Rack")
-
-        avg_v = grp_ts["Voltage_V"].mean().rename("Avg_Cell_V")
-        delta_v = (grp_ts["Voltage_V"].max() - grp_ts["Voltage_V"].min()).rename("Cell_V_Delta")
-        idx_min = grp_ts["Voltage_V"].idxmin()
-        idx_max = grp_ts["Voltage_V"].idxmax()
-
-        df_min = (
-            df_cells_time.loc[idx_min, ["Rack", "CellID", "Time", "Voltage_V"]]
-            .rename(
-                columns={
-                    "CellID": "Min_Cell_ID",
-                    "Time": "Min_Time",
-                    "Voltage_V": "Min_Cell_V",
-                }
-            )
-        )
-        df_max = (
-            df_cells_time.loc[idx_max, ["Rack", "CellID", "Time", "Voltage_V"]]
-            .rename(
-                columns={
-                    "CellID": "Max_Cell_ID",
-                    "Time": "Max_Time",
-                    "Voltage_V": "Max_Cell_V",
-                }
-            )
-        )
-
-        rack_stats_full = (
-            avg_v.to_frame()
-            .join(delta_v)
-            .reset_index()
-            .merge(df_min, on="Rack")
-            .merge(df_max, on="Rack")
-        )
-
-        rack_stats_full = rack_stats_full[
-            [
-                "Rack",
-                "Min_Cell_ID",
-                "Min_Cell_V",
-                "Min_Time",
-                "Max_Cell_ID",
-                "Max_Cell_V",
-                "Max_Time",
-                "Avg_Cell_V",
-                "Cell_V_Delta",
-            ]
-        ]
-
-        st.dataframe(
-            rack_stats_full.style.format(
-                {
-                    "Min_Cell_V": "{:.3f}",
-                    "Max_Cell_V": "{:.3f}",
-                    "Avg_Cell_V": "{:.3f}",
-                    "Cell_V_Delta": "{:.3f}",
-                }
-            )
-        )
-        st.caption(
-            "Min / Max are taken over the **entire file** (all timestamps) per rack. "
-            "Min/Max time shows when that extreme cell voltage occurred."
-        )
-
-        racks = ["All Racks"] + sorted(df_cells_time["Rack"].unique())
-        selected_rack = st.selectbox(
-            "Select rack for time-series plot",
-            racks,
-            key="ts_rack_sel",
-        )
-
-        df_plot = df_cells_time
-        if selected_rack != "All Racks":
-            df_plot = df_plot[df_plot["Rack"] == selected_rack]
-
-        st.write(
-            f"Plotting **{df_plot['CellID'].nunique()} cells**, "
-            f"{df_plot.shape[0]:,} points for {selected_rack}."
-        )
-
-        fig_ts = px.line(
-            df_plot,
-            x="Time",
-            y="Voltage_V",
-            color="CellID",
-            line_group="CellID",
-            title=f"Cell Voltages vs Time ({selected_rack})",
-            render_mode="webgl",
-        )
-        fig_ts.update_layout(
-            height=700,
-            xaxis_title="Time",
-            yaxis_title="Cell Voltage (V)",
-            legend_title="Cell",
-        )
-        st.plotly_chart(fig_ts, use_container_width=True)
-        st.warning(
                 f"Rack '{rack_name}' file has no V1/V2/... columns. Skipping this file."
             )
             continue
