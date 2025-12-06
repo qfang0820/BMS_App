@@ -142,9 +142,9 @@ st.caption(
 # =========================
 st.sidebar.header("📍 Navigation")
 
-# Main navigation
+# Main navigation (top-level)
 main_page = st.sidebar.radio(
-    "Go to:",
+    "Main section",
     ["BMS Overview", "Cell Detail"],
     index=0,
     key="main_page",
@@ -153,11 +153,14 @@ main_page = st.sidebar.radio(
 # Sub-navigation ONLY when BMS Overview is selected
 bms_subpage = None
 if main_page == "BMS Overview":
+    # Small visual indent + title to look like a hierarchy
+    st.sidebar.markdown("&nbsp;&nbsp;&nbsp;**BMS Overview pages**", unsafe_allow_html=True)
     bms_subpage = st.sidebar.radio(
-        "BMS Overview:",
+        " ",
         ["Overview", "Energy"],
         index=0,
         key="bms_subpage",
+        label_visibility="collapsed",  # hide label so it looks like bullets under BMS Overview
     )
 
 st.sidebar.markdown("---")
