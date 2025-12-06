@@ -33,12 +33,10 @@ def login():
         correct_user = st.secrets.get("APP_USERNAME", "")
         correct_pass = st.secrets.get("APP_PASSWORD", "")
 
-        # If secrets aren't set, this might allow login with empty fields 
-        # (Change logic if you want to enforce specific hardcoded values)
         if username == correct_user and password == correct_pass:
             st.session_state.logged_in = True
             st.success("Login successful. Loading app...")
-            st.rerun() # Rerun to refresh the page and show the app
+            st.rerun()  # Rerun to refresh the page and show the app
         else:
             st.error("Invalid username or password.")
 
@@ -146,47 +144,36 @@ st.caption(
 # =========================
 st.sidebar.header("📍 Navigation")
 
-# Define the "Tree" structure options
-# We use a unique key for the widget to avoid state conflicts
+# "Tree" structure: BMS Overview (implies Overview), Energy (child), Cell Detail
 nav_options = [
-    "BMS Overview",  # This acts as the "Header" and the "Overview" page
-        "Energy",        # Indented child
-    "Cell Detail"    # Sibling to BMS Overview
+    "BMS Overview",  # parent / Overview
+    "Energy",        # indented child
+    "Cell Detail",   # sibling to BMS Overview
 ]
 
-# The Radio Button
 selection = st.sidebar.radio(
     "Navigation Tree",
     nav_options,
     label_visibility="collapsed",
     key="nav_tree_selection",
-    # Custom Formatting to create the visual indentation
-    format_func=lambda x: f"⠀⠀• {x}" if x == "Energy" else x
+    format_func=lambda x: f"⠀⠀• {x}" if x == "Energy" else x,  # indent Energy
 )
 
-# ----------------------------------------------------
-# LOGIC MAPPING: Convert the single selection back 
-# into the variables your app expects (main_page, bms_subpage)
-# ----------------------------------------------------
-
+# Map selection back to main_page / bms_subpage
 if selection == "BMS Overview":
     main_page = "BMS Overview"
-    bms_subpage = "Overview"  # Default to Overview when parent is clicked
-
+    bms_subpage = "Overview"
 elif selection == "Energy":
     main_page = "BMS Overview"
     bms_subpage = "Energy"
-
 elif selection == "Cell Detail":
     main_page = "Cell Detail"
     bms_subpage = None
 
 st.sidebar.markdown("---")
 
-# ── File upload (collapsible) ───────────────────
-# (Keep your existing file upload code below this line...)
+# File upload (collapsible)
 with st.sidebar.expander("📁 Upload Data", expanded=False):
-    # ... rest of your upload code ...
     bms_file = st.file_uploader(
         "BMS pack-level log (.csv, .xlsx, .xls)",
         type=["csv", "xlsx", "xls"],
@@ -200,6 +187,7 @@ with st.sidebar.expander("📁 Upload Data", expanded=False):
     st.caption(
         "Upload BMS logs for pack analysis, and rack-level files on the **Cell Detail** page."
     )
+
 # =========================
 # Constants for BMS analysis
 # =========================
@@ -251,7 +239,7 @@ if bms_file is not None:
                 bms_has_2nd_max = "2nd MAX CELL" in df.columns
                 bms_has_2nd_min = "2nd MIN CELL" in df.columns
 
-                # Scaling (your rules)
+                # Scaling
                 df["Stack voltage"] = pd.to_numeric(df["Stack voltage"], errors="coerce") / 10
                 df["Stack current"] = pd.to_numeric(df["Stack current"], errors="coerce") / 10
                 df["SOC"] = pd.to_numeric(df["SOC"], errors="coerce") / 10
@@ -264,7 +252,6 @@ if bms_file is not None:
                 if bms_has_2nd_min:
                     df["2nd MIN CELL"] = pd.to_numeric(df["2nd MIN CELL"], errors="coerce") / 1000
 
-                # Time & numeric cleanup
                 time_col = "Time"
                 pack_v_col = "Stack voltage"
                 current_col = "Stack current"
@@ -785,12 +772,9 @@ elif main_page == "Cell Detail":
             )
             continue
 
-        # -----------------------------------------------------------
-        # Logic: Reconstruct Time based on Serial Number offset
-        # -----------------------------------------------------------
-        # We need at least one valid time string to start
+        # -------- Reconstruct Time from base Time + Serial number offset --------
         valid_time_idx = df_r["Time"].first_valid_index()
-        
+
         if valid_time_idx is None:
             st.warning(f"Rack '{rack_name}': No valid 'Time' found to establish a baseline.")
             continue
@@ -802,46 +786,35 @@ elif main_page == "Cell Detail":
             st.warning(f"Rack '{rack_name}': Error parsing base time/serial: {e}")
             continue
 
-        # Convert serial to numeric just in case
         df_r["Serial number"] = pd.to_numeric(df_r["Serial number"], errors="coerce").fillna(0)
 
-        # Calculate offset in seconds from the base_serial
-        # offset = (Current Serial - Base Serial)
         df_r["time_offset_s"] = df_r["Serial number"] - base_serial
         df_r["calculated_time"] = base_time + pd.to_timedelta(df_r["time_offset_s"], unit="s")
 
-        # Sort by time
         df_r = df_r.sort_values("calculated_time")
 
-        # -----------------------------------------------------------
-        # Logic: Scaling and numeric conversion
-        # -----------------------------------------------------------
-        # Ensure voltage columns are numeric
+        # Numeric conversion + scaling
         for c in v_cols:
             df_r[c] = pd.to_numeric(df_r[c], errors="coerce")
 
         if scale_mV:
             df_r[v_cols] = df_r[v_cols] / 1000.0
 
-        # -----------------------------------------------------------
-        # Logic: Store Snapshot (Last valid row)
-        # -----------------------------------------------------------
+        # -------- Snapshot: last valid row --------
         if not df_r.empty:
             last_row = df_r.iloc[-1]
-            
-            # Create a "long" format for this rack's last timestamp
-            # We want: RackName, CellIndex, Voltage
             for col in v_cols:
                 idx = cell_index(col)
                 val = last_row[col]
-                combined_cells_snap.append({
-                    "Rack": rack_name,
-                    "Cell Index": idx,
-                    "Voltage": val,
-                    "Time": last_row["calculated_time"]
-                })
+                combined_cells_snap.append(
+                    {
+                        "Rack": rack_name,
+                        "Cell Index": idx,
+                        "Voltage": val,
+                        "Time": last_row["calculated_time"],
+                    }
+                )
 
-            # Store full dataframe for time-series (optional usage)
             df_r["Rack"] = rack_name
             time_series_list.append(df_r)
 
@@ -849,53 +822,112 @@ elif main_page == "Cell Detail":
     # Visualizations
     # =========================
     st.markdown("---")
-    
+
     if not combined_cells_snap:
-        st.info("Upload rack files to see the cell heatmap.")
+        st.info("Upload rack files to see the cell heatmap and time-series plots.")
     else:
         df_snap = pd.DataFrame(combined_cells_snap)
-        
-        # 1. Heatmap
+
+        # 1. Heatmap (snapshot)
         st.subheader("Latest Snapshot Heatmap (All Racks)")
-        
-        # Pivot for heatmap: Index=Rack, Columns=Cell Index, Values=Voltage
-        # We sort Racks and Cell Indices to ensure order
         df_snap = df_snap.sort_values(by=["Rack", "Cell Index"])
-        
+
         fig_heat = px.density_heatmap(
             df_snap,
             x="Cell Index",
             y="Rack",
             z="Voltage",
-            color_continuous_scale="RdYlGn", # Red-Yellow-Green
+            color_continuous_scale="RdYlGn",
             text_auto=False,
-            title=f"Cell Voltages at End of Log (Approx Time: {df_snap['Time'].max()})"
+            title=f"Cell Voltages at End of Log (Approx Time: {df_snap['Time'].max()})",
         )
         fig_heat.update_layout(
-            xaxis_title="Cell Index", 
-            yaxis_title="Rack ID"
+            xaxis_title="Cell Index",
+            yaxis_title="Rack ID",
         )
         st.plotly_chart(fig_heat, use_container_width=True)
 
-        # 2. Statistics Table
+        # 2. Snapshot statistics per rack
         st.subheader("Rack Statistics (Snapshot)")
-        stats = df_snap.groupby("Rack")["Voltage"].agg(['min', 'max', 'mean', 'count']).reset_index()
+        stats = df_snap.groupby("Rack")["Voltage"].agg(["min", "max", "mean", "count"]).reset_index()
         stats["delta"] = stats["max"] - stats["min"]
-        st.dataframe(stats.style.format({
-            "min": "{:.3f}", 
-            "max": "{:.3f}", 
-            "mean": "{:.3f}", 
-            "delta": "{:.3f}"
-        }))
+        st.dataframe(
+            stats.style.format(
+                {
+                    "min": "{:.3f}",
+                    "max": "{:.3f}",
+                    "mean": "{:.3f}",
+                    "delta": "{:.3f}",
+                }
+            )
+        )
 
-        # 3. Min/Max Bar Chart
+        # 3. Delta bar chart
         st.subheader("Delta (Max - Min) per Rack")
         fig_bar = px.bar(
-            stats, 
-            x="Rack", 
-            y="delta", 
+            stats,
+            x="Rack",
+            y="delta",
             title="Voltage Imbalance (Delta) by Rack",
             color="delta",
-            color_continuous_scale="Reds"
+            color_continuous_scale="Reds",
         )
         st.plotly_chart(fig_bar, use_container_width=True)
+
+    # 4. Full time-series: V vs Time for all cells
+    st.subheader("📈 All Cells: V vs Time")
+
+    if not time_series_list:
+        st.info(
+            "Upload rack files with valid `Time`, `Serial number`, and V1..Vn data "
+            "to see full time-series plots."
+        )
+    else:
+        df_cells_time = pd.concat(time_series_list, ignore_index=True)
+
+        # Detect voltage columns again
+        v_cols_all = [c for c in df_cells_time.columns if c.upper().startswith("V")]
+        if not v_cols_all:
+            st.info("No voltage columns found in time-series data.")
+        else:
+            df_long = df_cells_time.melt(
+                id_vars=["Rack", "calculated_time"],
+                value_vars=v_cols_all,
+                var_name="CellID",
+                value_name="Voltage_V",
+            )
+            df_long["CellID"] = df_long["CellID"].apply(cell_index)
+            df_long = df_long.dropna(subset=["Voltage_V"])
+
+            racks_ts = ["All Racks"] + sorted(df_long["Rack"].unique())
+            selected_rack = st.selectbox(
+                "Select rack for time-series plot",
+                racks_ts,
+                key="ts_rack_sel",
+            )
+
+            df_plot = df_long
+            if selected_rack != "All Racks":
+                df_plot = df_plot[df_plot["Rack"] == selected_rack]
+
+            st.write(
+                f"Plotting **{df_plot['CellID'].nunique()} cells**, "
+                f"{df_plot.shape[0]:,} points for {selected_rack}."
+            )
+
+            fig_ts = px.line(
+                df_plot,
+                x="calculated_time",
+                y="Voltage_V",
+                color="CellID",
+                line_group="CellID",
+                title=f"Cell Voltages vs Time ({selected_rack})",
+                render_mode="webgl",
+            )
+            fig_ts.update_layout(
+                height=700,
+                xaxis_title="Time",
+                yaxis_title="Cell Voltage (V)",
+                legend_title="Cell",
+            )
+            st.plotly_chart(fig_ts, use_container_width=True)
