@@ -280,6 +280,8 @@ tab_bms_overview, tab_bms_energy, tab_cells = st.tabs(
 # =================================================================
 # BMS OVERVIEW TAB
 # =================================================================
+with tab_bms_overview:
+    st.subheader("BMS Pack-Level Overview")
 
     if bms_file is None and bms_df is None:
         st.info("Upload a **BMS log** in the sidebar to use this section.")
