@@ -140,8 +140,7 @@ st.caption(
 # =========================
 # Sidebar: Navigation + Upload
 # =========================
-
-st.sidebar.header("Navigation")
+st.sidebar.header("📍 Navigation")
 
 # Main navigation
 main_page = st.sidebar.radio(
@@ -178,7 +177,7 @@ with st.sidebar.expander("📁 Upload Data", expanded=False):
     )
 
     st.caption(
-        "Upload BMS logs for pack analysis, and rack-level files under the Cell Detail page."
+        "Upload BMS logs for pack analysis, and rack-level files on the **Cell Detail** page."
     )
 
 # =========================
@@ -302,7 +301,7 @@ if cell_file is not None:
 # =================================================================
 # MAIN SECTION: BMS OVERVIEW
 # =================================================================
-if main_section == "BMS Overview":
+if main_page == "BMS Overview":
 
     if bms_subpage == "Overview":
         st.subheader("BMS Pack-Level Overview")
@@ -676,7 +675,7 @@ if main_section == "BMS Overview":
 # =================================================================
 # MAIN SECTION: CELL DETAIL
 # =================================================================
-elif main_section == "Cell Detail":
+elif main_page == "Cell Detail":
     st.subheader("Cell-Level Detail by Rack")
 
     st.write(
