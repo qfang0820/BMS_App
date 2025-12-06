@@ -138,24 +138,8 @@ st.caption(
 )
 
 # =========================
-# Sidebar uploads + navigation
+# Sidebar: Navigation (always visible) + File upload (collapsible)
 # =========================
-st.sidebar.header("📁 Upload Data")
-
-bms_file = st.sidebar.file_uploader(
-    "BMS pack-level log (.csv, .xlsx, .xls)",
-    type=["csv", "xlsx", "xls"],
-    key="bms_file",
-)
-
-# This upload is not used in UI now but kept for future combined-mode if needed
-cell_file = st.sidebar.file_uploader(
-    "Cell-level combined data (.csv, .xlsx, .xls) – (currently unused)",
-    type=["csv", "xlsx", "xls"],
-    key="cell_file",
-)
-
-st.sidebar.markdown("---")
 st.sidebar.header("📍 Navigation")
 
 main_section = st.sidebar.radio(
@@ -173,6 +157,27 @@ if main_section == "BMS Overview":
         index=0,
         key="bms_subpage",
     )
+
+st.sidebar.markdown("---")
+
+# 📁 File upload area inside an expander (can be hidden with arrow)
+with st.sidebar.expander("📁 Upload Data", expanded=False):
+    bms_file = st.file_uploader(
+        "BMS pack-level log (.csv, .xlsx, .xls)",
+        type=["csv", "xlsx", "xls"],
+        key="bms_file",
+    )
+
+    cell_file = st.file_uploader(
+        "Cell-level combined data (.csv, .xlsx, .xls) – (currently unused)",
+        type=["csv", "xlsx", "xls"],
+        key="cell_file",
+    )
+
+    st.caption(
+        "Upload your BMS log for pack-level analysis, and rack cell files on the **Cell Detail** page."
+    )
+
 
 # =========================
 # Constants for BMS analysis
