@@ -250,7 +250,7 @@ if bms_file is not None:
                     bms_df = df
 
 # =========================
-# Cell combined data (mode 1)
+# Cell combined data (mode 1) – still defined but not used in UI
 # =========================
 cell_df_raw = None
 cell_error = None
@@ -271,14 +271,14 @@ if cell_file is not None:
             cell_df_raw.columns = cell_df_raw.columns.str.strip()
 
 # =========================
-# Tabs
+# Tabs – ONLY 2 main sections now
 # =========================
-tab_bms_overview, tab_bms_energy, tab_cells = st.tabs(
-    ["BMS Overview", "BMS Energy", "Cell Detail"]
+tab_bms_overview, tab_cells = st.tabs(
+    ["BMS Overview", "Cell Detail"]
 )
 
 # =================================================================
-# BMS OVERVIEW TAB
+# BMS OVERVIEW TAB (includes Energy subsection)
 # =================================================================
 with tab_bms_overview:
     st.subheader("BMS Pack-Level Overview")
@@ -386,20 +386,12 @@ with tab_bms_overview:
         fig_soc.update_layout(xaxis_title="Time", yaxis_title="SoC (%)")
         st.plotly_chart(fig_soc, use_container_width=True)
 
+        # -------------------------------------------------
+        # 🔋 BMS ENERGY SUBSECTION (moved here from old tab)
+        # -------------------------------------------------
+        st.markdown("---")
+        st.subheader("BMS Energy")
 
-# =================================================================
-# BMS ENERGY TAB
-# =================================================================
-with tab_bms_energy:
-    st.subheader("Energy In / Out (from BMS log)")
-
-    if bms_df is None:
-        if bms_error:
-            st.error(bms_error)
-        else:
-            st.info("Upload a **BMS log** in the sidebar to compute energy.")
-    else:
-        df = bms_df
         pack_v_col = "Stack voltage"
         current_col = "Stack current"
 
