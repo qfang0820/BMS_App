@@ -983,3 +983,122 @@ elif main_page == "Cell Detail":
             legend_title="Cell",
         )
         st.plotly_chart(fig_ts, use_container_width=True)
+        st.warning(
+                f"Rack '{rack_name}' file has no V1/V2/... columns. Skipping this file."
+            )
+            continue
+
+        # -----------------------------------------------------------
+        # Logic: Reconstruct Time based on Serial Number offset
+        # -----------------------------------------------------------
+        # We need at least one valid time string to start
+        valid_time_idx = df_r["Time"].first_valid_index()
+        
+        if valid_time_idx is None:
+            st.warning(f"Rack '{rack_name}': No valid 'Time' found to establish a baseline.")
+            continue
+
+        try:
+            base_time = pd.to_datetime(df_r.loc[valid_time_idx, "Time"])
+            base_serial = float(df_r.loc[valid_time_idx, "Serial number"])
+        except Exception as e:
+            st.warning(f"Rack '{rack_name}': Error parsing base time/serial: {e}")
+            continue
+
+        # Convert serial to numeric just in case
+        df_r["Serial number"] = pd.to_numeric(df_r["Serial number"], errors="coerce").fillna(0)
+
+        # Calculate offset in seconds from the base_serial
+        # offset = (Current Serial - Base Serial)
+        df_r["time_offset_s"] = df_r["Serial number"] - base_serial
+        df_r["calculated_time"] = base_time + pd.to_timedelta(df_r["time_offset_s"], unit="s")
+
+        # Sort by time
+        df_r = df_r.sort_values("calculated_time")
+
+        # -----------------------------------------------------------
+        # Logic: Scaling and numeric conversion
+        # -----------------------------------------------------------
+        # Ensure voltage columns are numeric
+        for c in v_cols:
+            df_r[c] = pd.to_numeric(df_r[c], errors="coerce")
+
+        if scale_mV:
+            df_r[v_cols] = df_r[v_cols] / 1000.0
+
+        # -----------------------------------------------------------
+        # Logic: Store Snapshot (Last valid row)
+        # -----------------------------------------------------------
+        if not df_r.empty:
+            last_row = df_r.iloc[-1]
+            
+            # Create a "long" format for this rack's last timestamp
+            # We want: RackName, CellIndex, Voltage
+            for col in v_cols:
+                idx = cell_index(col)
+                val = last_row[col]
+                combined_cells_snap.append({
+                    "Rack": rack_name,
+                    "Cell Index": idx,
+                    "Voltage": val,
+                    "Time": last_row["calculated_time"]
+                })
+
+            # Store full dataframe for time-series (optional usage)
+            df_r["Rack"] = rack_name
+            time_series_list.append(df_r)
+
+    # =========================
+    # Visualizations
+    # =========================
+    st.markdown("---")
+    
+    if not combined_cells_snap:
+        st.info("Upload rack files to see the cell heatmap.")
+    else:
+        df_snap = pd.DataFrame(combined_cells_snap)
+        
+        # 1. Heatmap
+        st.subheader("Latest Snapshot Heatmap (All Racks)")
+        
+        # Pivot for heatmap: Index=Rack, Columns=Cell Index, Values=Voltage
+        # We sort Racks and Cell Indices to ensure order
+        df_snap = df_snap.sort_values(by=["Rack", "Cell Index"])
+        
+        fig_heat = px.density_heatmap(
+            df_snap,
+            x="Cell Index",
+            y="Rack",
+            z="Voltage",
+            color_continuous_scale="RdYlGn", # Red-Yellow-Green
+            text_auto=False,
+            title=f"Cell Voltages at End of Log (Approx Time: {df_snap['Time'].max()})"
+        )
+        fig_heat.update_layout(
+            xaxis_title="Cell Index", 
+            yaxis_title="Rack ID"
+        )
+        st.plotly_chart(fig_heat, use_container_width=True)
+
+        # 2. Statistics Table
+        st.subheader("Rack Statistics (Snapshot)")
+        stats = df_snap.groupby("Rack")["Voltage"].agg(['min', 'max', 'mean', 'count']).reset_index()
+        stats["delta"] = stats["max"] - stats["min"]
+        st.dataframe(stats.style.format({
+            "min": "{:.3f}", 
+            "max": "{:.3f}", 
+            "mean": "{:.3f}", 
+            "delta": "{:.3f}"
+        }))
+
+        # 3. Min/Max Bar Chart
+        st.subheader("Delta (Max - Min) per Rack")
+        fig_bar = px.bar(
+            stats, 
+            x="Rack", 
+            y="delta", 
+            title="Voltage Imbalance (Delta) by Rack",
+            color="delta",
+            color_continuous_scale="Reds"
+        )
+        st.plotly_chart(fig_bar, use_container_width=True)
