@@ -142,30 +142,38 @@ st.caption(
 # =========================
 st.sidebar.header("📍 Navigation")
 
-# Main navigation (top-level)
+# ── Top-level pages ─────────────────────────────
+# Label hidden so it doesn't show "Main section"
 main_page = st.sidebar.radio(
-    "Main section",
+    "",
     ["BMS Overview", "Cell Detail"],
     index=0,
     key="main_page",
+    label_visibility="collapsed",
 )
 
-# Sub-navigation ONLY when BMS Overview is selected
-bms_subpage = None
+# Little helper text to look like your tree:
+# 📍 Navigation
+#   ○ BMS Overview
+#         • Overview
+#         • Energy
+#   ○ Cell Detail
 if main_page == "BMS Overview":
-    # Small visual indent + title to look like a hierarchy
-    st.sidebar.markdown("&nbsp;&nbsp;&nbsp;**BMS Overview pages**", unsafe_allow_html=True)
+    # Indented title for sub-pages
+    st.sidebar.markdown("&nbsp;&nbsp;&nbsp;**BMS Overview**", unsafe_allow_html=True)
     bms_subpage = st.sidebar.radio(
-        " ",
+        "",
         ["Overview", "Energy"],
         index=0,
         key="bms_subpage",
-        label_visibility="collapsed",  # hide label so it looks like bullets under BMS Overview
+        label_visibility="collapsed",
     )
+else:
+    bms_subpage = None  # not used on Cell Detail page
 
 st.sidebar.markdown("---")
 
-# File upload collapsible section
+# ── File upload (collapsible) ───────────────────
 with st.sidebar.expander("📁 Upload Data", expanded=False):
     bms_file = st.file_uploader(
         "BMS pack-level log (.csv, .xlsx, .xls)",
