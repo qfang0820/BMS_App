@@ -281,7 +281,6 @@ tab_bms_overview, tab_bms_energy, tab_cells = st.tabs(
 # BMS OVERVIEW TAB
 # =================================================================
 with tab_bms_overview:
-    st.subheader("BMS Pack-Level Overview")
 
     if bms_file is None and bms_df is None:
         st.info("Upload a **BMS log** in the sidebar to use this section.")
@@ -298,10 +297,6 @@ with tab_bms_overview:
         min_cell_v_col = "MIN CELL"
         second_max_col = "2nd MAX CELL" if bms_has_2nd_max else None
         second_min_col = "2nd MIN CELL" if bms_has_2nd_min else None
-
-        st.markdown("### Raw BMS Data Preview")
-        st.dataframe(df.head(50))
-        st.caption(f"Rows: {df.shape[0]}, Columns: {df.shape[1]}")
 
         st.markdown("### Key Metrics")
         c1, c2, c3, c4 = st.columns(4)
