@@ -45,6 +45,8 @@ def login():
 # Call login before showing the main app
 login()
 
+st.title("BMS + Cell Analyzer")
+
 # =========================
 # Downloadable templates
 # =========================
@@ -136,7 +138,7 @@ st.caption(
 )
 
 # =========================
-# Sidebar uploads
+# Sidebar uploads + navigation
 # =========================
 st.sidebar.header("📁 Upload Data")
 
@@ -146,11 +148,31 @@ bms_file = st.sidebar.file_uploader(
     key="bms_file",
 )
 
+# This upload is not used in UI now but kept for future combined-mode if needed
 cell_file = st.sidebar.file_uploader(
-    "Cell-level combined data (.csv, .xlsx, .xls) – optional for single-file mode",
+    "Cell-level combined data (.csv, .xlsx, .xls) – (currently unused)",
     type=["csv", "xlsx", "xls"],
     key="cell_file",
 )
+
+st.sidebar.markdown("---")
+st.sidebar.header("📍 Navigation")
+
+main_section = st.sidebar.radio(
+    "Main section",
+    ["BMS Overview", "Cell Detail"],
+    index=0,
+    key="main_section",
+)
+
+bms_subpage = None
+if main_section == "BMS Overview":
+    bms_subpage = st.sidebar.radio(
+        "BMS Overview pages",
+        ["Overview", "Energy"],
+        index=0,
+        key="bms_subpage",
+    )
 
 # =========================
 # Constants for BMS analysis
@@ -250,7 +272,7 @@ if bms_file is not None:
                     bms_df = df
 
 # =========================
-# Cell combined data (mode 1) – still defined but not used in UI
+# (Unused) cell_file prep – kept for future
 # =========================
 cell_df_raw = None
 cell_error = None
@@ -270,385 +292,384 @@ if cell_file is not None:
         else:
             cell_df_raw.columns = cell_df_raw.columns.str.strip()
 
-# =========================
-# Tabs – ONLY 2 main sections now
-# =========================
-tab_bms_overview, tab_cells = st.tabs(
-    ["BMS Overview", "Cell Detail"]
-)
-
 # =================================================================
-# BMS OVERVIEW TAB (includes Energy subsection)
+# MAIN SECTION: BMS OVERVIEW
 # =================================================================
-with tab_bms_overview:
-    st.subheader("BMS Pack-Level Overview")
+if main_section == "BMS Overview":
 
-    if bms_file is None and bms_df is None:
-        st.info("Upload a **BMS log** in the sidebar to use this section.")
-    elif bms_error is not None:
-        st.error(bms_error)
-        if bms_df is not None:
-            st.dataframe(bms_df.head(50))
-    elif bms_df is not None:
-        df = bms_df
-        pack_v_col = "Stack voltage"
-        current_col = "Stack current"
-        soc_col = "SOC"
-        max_cell_v_col = "MAX CELL"
-        min_cell_v_col = "MIN CELL"
-        second_max_col = "2nd MAX CELL" if bms_has_2nd_max else None
-        second_min_col = "2nd MIN CELL" if bms_has_2nd_min else None
+    if bms_subpage == "Overview":
+        st.subheader("BMS Pack-Level Overview")
 
-        st.markdown("### Key Metrics")
-        c1, c2, c3, c4 = st.columns(4)
+        if bms_file is None and bms_df is None:
+            st.info("Upload a **BMS log** in the sidebar to use this section.")
+        elif bms_error is not None:
+            st.error(bms_error)
+            if bms_df is not None:
+                st.dataframe(bms_df.head(50))
+        elif bms_df is not None:
+            df = bms_df
+            pack_v_col = "Stack voltage"
+            current_col = "Stack current"
+            soc_col = "SOC"
+            max_cell_v_col = "MAX CELL"
+            min_cell_v_col = "MIN CELL"
+            second_max_col = "2nd MAX CELL" if bms_has_2nd_max else None
+            second_min_col = "2nd MIN CELL" if bms_has_2nd_min else None
 
-        with c1:
-            st.metric("Pack Voltage Max", f"{df[pack_v_col].max():.2f} V")
-            st.metric("Pack Voltage Min", f"{df[pack_v_col].min():.2f} V")
+            st.markdown("### Key Metrics")
+            c1, c2, c3, c4 = st.columns(4)
 
-        with c2:
-            st.metric("Min Cell Voltage (Abs Min)", f"{df[min_cell_v_col].min():.3f} V")
-            st.metric("Max Cell Voltage (Abs Max)", f"{df[max_cell_v_col].max():.3f} V")
+            with c1:
+                st.metric("Pack Voltage Max", f"{df[pack_v_col].max():.2f} V")
+                st.metric("Pack Voltage Min", f"{df[pack_v_col].min():.2f} V")
 
-        with c3:
-            st.metric("Max Charge Current", f"{df[current_col].max():.1f} A")
-            st.metric("Max Discharge Current", f"{df[current_col].min():.1f} A")
+            with c2:
+                st.metric("Min Cell Voltage (Abs Min)", f"{df[min_cell_v_col].min():.3f} V")
+                st.metric("Max Cell Voltage (Abs Max)", f"{df[max_cell_v_col].max():.3f} V")
 
-        with c4:
-            st.metric(
-                "SoC Range",
-                f"{df[soc_col].min():.1f} % → {df[soc_col].max():.1f} %",
+            with c3:
+                st.metric("Max Charge Current", f"{df[current_col].max():.1f} A")
+                st.metric("Max Discharge Current", f"{df[current_col].min():.1f} A")
+
+            with c4:
+                st.metric(
+                    "SoC Range",
+                    f"{df[soc_col].min():.1f} % → {df[soc_col].max():.1f} %",
+                )
+
+            st.markdown("---")
+            st.markdown("### Trends Over Time")
+
+            # Stack voltage
+            fig_pack = px.line(
+                df,
+                x="__time__",
+                y=pack_v_col,
+                title="Stack Voltage Over Time",
             )
+            fig_pack.update_layout(xaxis_title="Time", yaxis_title="Voltage (V)")
+            st.plotly_chart(fig_pack, use_container_width=True)
 
-        st.markdown("---")
-        st.markdown("### Trends Over Time")
+            # Cell voltages
+            y_cols = [min_cell_v_col, max_cell_v_col]
+            legend_names = {
+                min_cell_v_col: "MIN CELL",
+                max_cell_v_col: "MAX CELL",
+            }
+            if second_min_col is not None:
+                y_cols.append(second_min_col)
+                legend_names[second_min_col] = "2nd MIN CELL"
+            if second_max_col is not None:
+                y_cols.append(second_max_col)
+                legend_names[second_max_col] = "2nd MAX CELL"
 
-        # Stack voltage
-        fig_pack = px.line(
-            df,
-            x="__time__",
-            y=pack_v_col,
-            title="Stack Voltage Over Time",
-        )
-        fig_pack.update_layout(xaxis_title="Time", yaxis_title="Voltage (V)")
-        st.plotly_chart(fig_pack, use_container_width=True)
+            fig_cells = px.line(
+                df,
+                x="__time__",
+                y=y_cols,
+                title="Cell Voltages Over Time",
+            )
+            fig_cells.update_layout(xaxis_title="Time", yaxis_title="Cell Voltage (V)")
+            fig_cells.for_each_trace(lambda t: t.update(name=legend_names.get(t.name, t.name)))
+            st.plotly_chart(fig_cells, use_container_width=True)
 
-        # Cell voltages
-        y_cols = [min_cell_v_col, max_cell_v_col]
-        legend_names = {
-            min_cell_v_col: "MIN CELL",
-            max_cell_v_col: "MAX CELL",
-        }
-        if second_min_col is not None:
-            y_cols.append(second_min_col)
-            legend_names[second_min_col] = "2nd MIN CELL"
-        if second_max_col is not None:
-            y_cols.append(second_max_col)
-            legend_names[second_max_col] = "2nd MAX CELL"
+            # Cell delta
+            fig_delta = px.line(
+                df,
+                x="__time__",
+                y="cell_delta",
+                title="Cell Voltage Delta (MAX - MIN)",
+            )
+            fig_delta.update_layout(xaxis_title="Time", yaxis_title="Delta (V)")
+            st.plotly_chart(fig_delta, use_container_width=True)
 
-        fig_cells = px.line(
-            df,
-            x="__time__",
-            y=y_cols,
-            title="Cell Voltages Over Time",
-        )
-        fig_cells.update_layout(xaxis_title="Time", yaxis_title="Cell Voltage (V)")
-        fig_cells.for_each_trace(lambda t: t.update(name=legend_names.get(t.name, t.name)))
-        st.plotly_chart(fig_cells, use_container_width=True)
+            # Current
+            fig_current = px.line(
+                df,
+                x="__time__",
+                y=current_col,
+                title="Stack Current Over Time",
+            )
+            fig_current.update_layout(xaxis_title="Time", yaxis_title="Current (A)")
+            st.plotly_chart(fig_current, use_container_width=True)
 
-        # Cell delta
-        fig_delta = px.line(
-            df,
-            x="__time__",
-            y="cell_delta",
-            title="Cell Voltage Delta (MAX - MIN)",
-        )
-        fig_delta.update_layout(xaxis_title="Time", yaxis_title="Delta (V)")
-        st.plotly_chart(fig_delta, use_container_width=True)
+            # SoC
+            fig_soc = px.line(
+                df,
+                x="__time__",
+                y=soc_col,
+                title="State of Charge (SoC) Over Time",
+            )
+            fig_soc.update_layout(xaxis_title="Time", yaxis_title="SoC (%)")
+            st.plotly_chart(fig_soc, use_container_width=True)
 
-        # Current
-        fig_current = px.line(
-            df,
-            x="__time__",
-            y=current_col,
-            title="Stack Current Over Time",
-        )
-        fig_current.update_layout(xaxis_title="Time", yaxis_title="Current (A)")
-        st.plotly_chart(fig_current, use_container_width=True)
-
-        # SoC
-        fig_soc = px.line(
-            df,
-            x="__time__",
-            y=soc_col,
-            title="State of Charge (SoC) Over Time",
-        )
-        fig_soc.update_layout(xaxis_title="Time", yaxis_title="SoC (%)")
-        st.plotly_chart(fig_soc, use_container_width=True)
-
-        # -------------------------------------------------
-        # 🔋 BMS ENERGY SUBSECTION (moved here from old tab)
-        # -------------------------------------------------
-        st.markdown("---")
+    elif bms_subpage == "Energy":
         st.subheader("BMS Energy")
 
-        pack_v_col = "Stack voltage"
-        current_col = "Stack current"
-
-        t_min = df["__time__"].min()
-        t_max = df["__time__"].max()
-
-        start_t, end_t = st.select_slider(
-            "Select time range",
-            options=list(df["__time__"]),
-            value=(t_min, t_max),
-        )
-
-        if start_t >= end_t:
-            st.warning("Start time must be before end time.")
-        else:
-            df_energy = df[(df["__time__"] >= start_t) & (df["__time__"] <= end_t)].copy()
-
-            if len(df_energy) < 2:
-                st.warning("Not enough points in this time range to compute energy.")
+        if bms_df is None:
+            if bms_error:
+                st.error(bms_error)
             else:
-                df_energy["dt_h"] = df_energy["__time__"].shift(-1) - df_energy["__time__"]
-                df_energy["dt_h"] = df_energy["dt_h"].dt.total_seconds().fillna(0) / 3600.0
+                st.info("Upload a **BMS log** in the sidebar to compute energy.")
+        else:
+            df = bms_df
+            pack_v_col = "Stack voltage"
+            current_col = "Stack current"
 
-                df_energy["power_kW"] = df_energy[pack_v_col] * df_energy[current_col] / 1000.0
-                df_energy["dE_kWh"] = df_energy["power_kW"] * df_energy["dt_h"]
+            t_min = df["__time__"].min()
+            t_max = df["__time__"].max()
 
-                energy_out_kWh = df_energy.loc[df_energy["power_kW"] > 0, "dE_kWh"].sum()
-                energy_in_kWh = -df_energy.loc[df_energy["power_kW"] < 0, "dE_kWh"].sum()
-                net_energy_kWh = energy_out_kWh - energy_in_kWh
+            start_t, end_t = st.select_slider(
+                "Select time range",
+                options=list(df["__time__"]),
+                value=(t_min, t_max),
+            )
 
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Energy OUT (Discharge)", f"{energy_out_kWh:.2f} kWh")
-                c2.metric("Energy IN (Charge)", f"{energy_in_kWh:.2f} kWh")
-                c3.metric("Net Energy (OUT - IN)", f"{net_energy_kWh:.2f} kWh")
+            if start_t >= end_t:
+                st.warning("Start time must be before end time.")
+            else:
+                df_energy = df[(df["__time__"] >= start_t) & (df["__time__"] <= end_t)].copy()
 
-                st.caption(
-                    f"Time window: {start_t.strftime('%Y-%m-%d %H:%M:%S')} → "
-                    f"{end_t.strftime('%Y-%m-%d %H:%M:%S')} "
-                    f"({(end_t - start_t).total_seconds()/3600.0:.2f} hours)"
-                )
-
-                fig_pwr = px.line(
-                    df_energy,
-                    x="__time__",
-                    y="power_kW",
-                    title="Power (kW) in Selected Range",
-                )
-                fig_pwr.update_layout(xaxis_title="Time", yaxis_title="Power (kW)")
-                st.plotly_chart(fig_pwr, use_container_width=True)
-
-                with st.expander("Show calculation table (first 200 rows)"):
-                    st.dataframe(
-                        df_energy[
-                            ["__time__", pack_v_col, current_col, "power_kW", "dt_h", "dE_kWh"]
-                        ].rename(
-                            columns={
-                                "__time__": "Time",
-                                pack_v_col: "Stack Voltage (V)",
-                                current_col: "Stack Current (A)",
-                                "power_kW": "Power (kW)",
-                                "dt_h": "Δt (h)",
-                                "dE_kWh": "ΔE (kWh)",
-                            }
-                        ).head(200)
-                    )
-
-                # -------------------------------------------------
-                # Theoretical container energy from LFP cell specs
-                # -------------------------------------------------
-                st.markdown("---")
-                st.subheader("Theoretical Container Energy (LFP OCV Model)")
-
-                # ---- User inputs ----
-                cell_Ah = st.number_input(
-                    "Cell capacity (Ah)",
-                    min_value=0.1,
-                    max_value=2000.0,
-                    value=280.0,
-                    step=10.0,
-                    help="Nameplate Ah rating of one LFP cell",
-                    key="energy_cell_Ah",
-                )
-
-                cells_per_string = st.number_input(
-                    "Cells in series per string",
-                    min_value=1,
-                    max_value=2000,
-                    value=396,
-                    step=1,
-                    help="For example: 396 cells in series in one rack/string",
-                    key="energy_cells_per_string",
-                )
-
-                num_strings = st.number_input(
-                    "Number of parallel strings / racks",
-                    min_value=1,
-                    max_value=100,
-                    value=4,
-                    step=1,
-                    help="For example: number of racks tied in parallel on the DC bus",
-                    key="energy_num_strings",
-                )
-
-                charge_cutoff = st.number_input(
-                    "Charge cutoff voltage per cell (V)",
-                    min_value=0.0,
-                    max_value=10.0,
-                    value=3.6,
-                    step=0.01,
-                    key="energy_charge_cutoff",
-                )
-
-                discharge_cutoff = st.number_input(
-                    "Discharge cutoff voltage per cell (V)",
-                    min_value=0.0,
-                    max_value=10.0,
-                    value=2.7,
-                    step=0.01,
-                    key="energy_discharge_cutoff",
-                )
-
-                weak_cells = st.number_input(
-                    "Number of weak cells to bypass/remove",
-                    min_value=0,
-                    max_value=1000,
-                    value=1,
-                    step=1,
-                    help="If one or more cells are effectively unusable and must be removed from the energy budget.",
-                    key="energy_weak_cells",
-                )
-
-                # ---- Approximate LFP OCV curve (SoC in [0,1]) ----
-                # Points: (SoC, Voltage [V])
-                lfp_curve = [
-                    (0.00, 2.50),
-                    (0.05, 3.00),
-                    (0.10, 3.20),
-                    (0.20, 3.25),
-                    (0.80, 3.28),
-                    (0.90, 3.30),
-                    (0.95, 3.35),
-                    (1.00, 3.60),
-                ]
-
-                def ocv_lfp(soc: float) -> float:
-                    """Piecewise-linear OCV(soc) for LFP."""
-                    if soc <= 0.0:
-                        return lfp_curve[0][1]
-                    if soc >= 1.0:
-                        return lfp_curve[-1][1]
-                    for (s1, v1), (s2, v2) in zip(lfp_curve, lfp_curve[1:]):
-                        if s1 <= soc <= s2:
-                            t = (soc - s1) / (s2 - s1)
-                            return v1 + t * (v2 - v1)
-                    return lfp_curve[-1][1]
-
-                def find_soc_for_voltage(v_target: float, steps: int = 2000):
-                    """
-                    Find SOC in [0,1] where OCV(SOC) ≈ v_target by scanning and interpolating.
-                    Returns None if not found.
-                    """
-                    s_prev = 0.0
-                    v_prev = ocv_lfp(s_prev)
-                    for i in range(1, steps + 1):
-                        s = i / steps
-                        v = ocv_lfp(s)
-                        if (v_prev - v_target) * (v - v_target) <= 0:
-                            if v == v_prev:
-                                return s
-                            t = (v_target - v_prev) / (v - v_prev)
-                            s_cross = s_prev + t * (s - s_prev)
-                            return max(0.0, min(1.0, s_cross))
-                        s_prev, v_prev = s, v
-                    return None
-
-                def integrate_ocv(soc_min: float, soc_max: float, steps: int = 1000) -> float:
-                    """
-                    Numerically integrate OCV(soc) d(soc) from soc_min to soc_max
-                    using midpoint rule. Returns ∫ V dSOC (unit: V * fraction_of_SOC).
-                    """
-                    if soc_max <= soc_min:
-                        return 0.0
-                    ds = (soc_max - soc_min) / steps
-                    total = 0.0
-                    for i in range(steps):
-                        s_mid = soc_min + (i + 0.5) * ds
-                        total += ocv_lfp(s_mid)
-                    return total * ds
-
-                # ---- Map voltage cutoffs to SOC window using OCV curve ----
-                if charge_cutoff <= discharge_cutoff:
-                    st.warning("Charge cutoff must be higher than discharge cutoff.")
-                elif cell_Ah <= 0 or cells_per_string <= 0 or num_strings <= 0:
-                    st.warning("Please enter positive values for cell Ah, cell count, and number of strings.")
+                if len(df_energy) < 2:
+                    st.warning("Not enough points in this time range to compute energy.")
                 else:
-                    soc_min = find_soc_for_voltage(discharge_cutoff)
-                    soc_max = find_soc_for_voltage(charge_cutoff)
+                    df_energy["dt_h"] = df_energy["__time__"].shift(-1) - df_energy["__time__"]
+                    df_energy["dt_h"] = df_energy["dt_h"].dt.total_seconds().fillna(0) / 3600.0
 
-                    if soc_min is None:
-                        soc_min = 0.0
-                    if soc_max is None:
-                        soc_max = 1.0
+                    df_energy["power_kW"] = df_energy[pack_v_col] * df_energy[current_col] / 1000.0
+                    df_energy["dE_kWh"] = df_energy["power_kW"] * df_energy["dt_h"]
 
-                    if soc_max <= soc_min:
-                        st.warning(
-                            "Could not determine a valid SOC window from the specified cutoffs "
-                            "using the LFP OCV curve. Using full 0–100% SOC as fallback."
-                        )
-                        soc_min, soc_max = 0.0, 1.0
+                    energy_out_kWh = df_energy.loc[df_energy["power_kW"] > 0, "dE_kWh"].sum()
+                    energy_in_kWh = -df_energy.loc[df_energy["power_kW"] < 0, "dE_kWh"].sum()
+                    net_energy_kWh = energy_out_kWh - energy_in_kWh
 
-                    usable_soc_pct = (soc_max - soc_min) * 100.0
-                    integral_VdSOC = integrate_ocv(soc_min, soc_max, steps=1000)
-                    avg_voltage = integral_VdSOC / (soc_max - soc_min) if soc_max > soc_min else 0.0
-
-                    # per-cell usable energy in Wh
-                    energy_cell_Wh = cell_Ah * integral_VdSOC
-
-                    total_cells = cells_per_string * num_strings
-                    effective_cells = max(total_cells - weak_cells, 0)
-
-                    full_energy_kWh = energy_cell_Wh * total_cells / 1000.0
-                    weak_energy_kWh = energy_cell_Wh * effective_cells / 1000.0
-
-                    shortfall_kWh = full_energy_kWh - weak_energy_kWh
-                    shortfall_pct = (shortfall_kWh / full_energy_kWh * 100.0) if full_energy_kWh > 0 else 0.0
-
-                    st.markdown(
-                        f"Estimated usable SOC window from LFP OCV curve: **{usable_soc_pct:.1f}%** "
-                        f"({soc_min*100:.1f}% → {soc_max*100:.1f}%).  "
-                        f"Average cell voltage over this window ≈ **{avg_voltage:.3f} V**."
-                    )
-
-                    cE1, cE2, cE3 = st.columns(3)
-                    cE1.metric(
-                        "Full theoretical energy (all cells healthy)",
-                        f"{full_energy_kWh:.1f} kWh",
-                    )
-                    cE2.metric(
-                        "Energy if weak cell(s) removed",
-                        f"{weak_energy_kWh:.1f} kWh",
-                    )
-                    cE3.metric(
-                        "Shortfall vs full design",
-                        f"{shortfall_kWh:.1f} kWh ({shortfall_pct:.2f} %)",
-                    )
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Energy OUT (Discharge)", f"{energy_out_kWh:.2f} kWh")
+                    c2.metric("Energy IN (Charge)", f"{energy_in_kWh:.2f} kWh")
+                    c3.metric("Net Energy (OUT - IN)", f"{net_energy_kWh:.2f} kWh")
 
                     st.caption(
-                        "Based on an approximate **LFP OCV–SoC curve**, integrated between the SOC levels "
-                        "corresponding to your per-cell voltage cutoffs. "
-                        "This is still an approximation (real cells differ with temperature, rate, ageing), "
-                        "but it is more realistic than a simple linear voltage model."
+                        f"Time window: {start_t.strftime('%Y-%m-%d %H:%M:%S')} → "
+                        f"{end_t.strftime('%Y-%m-%d %H:%M:%S')} "
+                        f"({(end_t - start_t).total_seconds()/3600.0:.2f} hours)"
                     )
 
+                    fig_pwr = px.line(
+                        df_energy,
+                        x="__time__",
+                        y="power_kW",
+                        title="Power (kW) in Selected Range",
+                    )
+                    fig_pwr.update_layout(xaxis_title="Time", yaxis_title="Power (kW)")
+                    st.plotly_chart(fig_pwr, use_container_width=True)
+
+                    with st.expander("Show calculation table (first 200 rows)"):
+                        st.dataframe(
+                            df_energy[
+                                ["__time__", pack_v_col, current_col, "power_kW", "dt_h", "dE_kWh"]
+                            ].rename(
+                                columns={
+                                    "__time__": "Time",
+                                    pack_v_col: "Stack Voltage (V)",
+                                    current_col: "Stack Current (A)",
+                                    "power_kW": "Power (kW)",
+                                    "dt_h": "Δt (h)",
+                                    "dE_kWh": "ΔE (kWh)",
+                                }
+                            ).head(200)
+                        )
+
+                    # -------------------------------------------------
+                    # Theoretical container energy from LFP cell specs
+                    # -------------------------------------------------
+                    st.markdown("---")
+                    st.subheader("Theoretical Container Energy (LFP OCV Model)")
+
+                    # ---- User inputs ----
+                    cell_Ah = st.number_input(
+                        "Cell capacity (Ah)",
+                        min_value=0.1,
+                        max_value=2000.0,
+                        value=280.0,
+                        step=10.0,
+                        help="Nameplate Ah rating of one LFP cell",
+                        key="energy_cell_Ah",
+                    )
+
+                    cells_per_string = st.number_input(
+                        "Cells in series per string",
+                        min_value=1,
+                        max_value=2000,
+                        value=396,
+                        step=1,
+                        help="For example: 396 cells in series in one rack/string",
+                        key="energy_cells_per_string",
+                    )
+
+                    num_strings = st.number_input(
+                        "Number of parallel strings / racks",
+                        min_value=1,
+                        max_value=100,
+                        value=4,
+                        step=1,
+                        help="For example: number of racks tied in parallel on the DC bus",
+                        key="energy_num_strings",
+                    )
+
+                    charge_cutoff = st.number_input(
+                        "Charge cutoff voltage per cell (V)",
+                        min_value=0.0,
+                        max_value=10.0,
+                        value=3.6,
+                        step=0.01,
+                        key="energy_charge_cutoff",
+                    )
+
+                    discharge_cutoff = st.number_input(
+                        "Discharge cutoff voltage per cell (V)",
+                        min_value=0.0,
+                        max_value=10.0,
+                        value=2.7,
+                        step=0.01,
+                        key="energy_discharge_cutoff",
+                    )
+
+                    weak_cells = st.number_input(
+                        "Number of weak cells to bypass/remove",
+                        min_value=0,
+                        max_value=1000,
+                        value=1,
+                        step=1,
+                        help="If one or more cells are effectively unusable and must be removed from the energy budget.",
+                        key="energy_weak_cells",
+                    )
+
+                    # ---- Approximate LFP OCV curve (SoC in [0,1]) ----
+                    # Points: (SoC, Voltage [V])
+                    lfp_curve = [
+                        (0.00, 2.50),
+                        (0.05, 3.00),
+                        (0.10, 3.20),
+                        (0.20, 3.25),
+                        (0.80, 3.28),
+                        (0.90, 3.30),
+                        (0.95, 3.35),
+                        (1.00, 3.60),
+                    ]
+
+                    def ocv_lfp(soc: float) -> float:
+                        """Piecewise-linear OCV(soc) for LFP."""
+                        if soc <= 0.0:
+                            return lfp_curve[0][1]
+                        if soc >= 1.0:
+                            return lfp_curve[-1][1]
+                        for (s1, v1), (s2, v2) in zip(lfp_curve, lfp_curve[1:]):
+                            if s1 <= soc <= s2:
+                                t = (soc - s1) / (s2 - s1)
+                                return v1 + t * (v2 - v1)
+                        return lfp_curve[-1][1]
+
+                    def find_soc_for_voltage(v_target: float, steps: int = 2000):
+                        """
+                        Find SOC in [0,1] where OCV(SOC) ≈ v_target by scanning and interpolating.
+                        Returns None if not found.
+                        """
+                        s_prev = 0.0
+                        v_prev = ocv_lfp(s_prev)
+                        for i in range(1, steps + 1):
+                            s = i / steps
+                            v = ocv_lfp(s)
+                            if (v_prev - v_target) * (v - v_target) <= 0:
+                                if v == v_prev:
+                                    return s
+                                t = (v_target - v_prev) / (v - v_prev)
+                                s_cross = s_prev + t * (s - s_prev)
+                                return max(0.0, min(1.0, s_cross))
+                            s_prev, v_prev = s, v
+                        return None
+
+                    def integrate_ocv(soc_min: float, soc_max: float, steps: int = 1000) -> float:
+                        """
+                        Numerically integrate OCV(soc) d(soc) from soc_min to soc_max
+                        using midpoint rule. Returns ∫ V dSOC (unit: V * fraction_of_SOC).
+                        """
+                        if soc_max <= soc_min:
+                            return 0.0
+                        ds = (soc_max - soc_min) / steps
+                        total = 0.0
+                        for i in range(steps):
+                            s_mid = soc_min + (i + 0.5) * ds
+                            total += ocv_lfp(s_mid)
+                        return total * ds
+
+                    # ---- Map voltage cutoffs to SOC window using OCV curve ----
+                    if charge_cutoff <= discharge_cutoff:
+                        st.warning("Charge cutoff must be higher than discharge cutoff.")
+                    elif cell_Ah <= 0 or cells_per_string <= 0 or num_strings <= 0:
+                        st.warning("Please enter positive values for cell Ah, cell count, and number of strings.")
+                    else:
+                        soc_min = find_soc_for_voltage(discharge_cutoff)
+                        soc_max = find_soc_for_voltage(charge_cutoff)
+
+                        if soc_min is None:
+                            soc_min = 0.0
+                        if soc_max is None:
+                            soc_max = 1.0
+
+                        if soc_max <= soc_min:
+                            st.warning(
+                                "Could not determine a valid SOC window from the specified cutoffs "
+                                "using the LFP OCV curve. Using full 0–100% SOC as fallback."
+                            )
+                            soc_min, soc_max = 0.0, 1.0
+
+                        usable_soc_pct = (soc_max - soc_min) * 100.0
+                        integral_VdSOC = integrate_ocv(soc_min, soc_max, steps=1000)
+                        avg_voltage = integral_VdSOC / (soc_max - soc_min) if soc_max > soc_min else 0.0
+
+                        # per-cell usable energy in Wh
+                        energy_cell_Wh = cell_Ah * integral_VdSOC
+
+                        total_cells = cells_per_string * num_strings
+                        effective_cells = max(total_cells - weak_cells, 0)
+
+                        full_energy_kWh = energy_cell_Wh * total_cells / 1000.0
+                        weak_energy_kWh = energy_cell_Wh * effective_cells / 1000.0
+
+                        shortfall_kWh = full_energy_kWh - weak_energy_kWh
+                        shortfall_pct = (shortfall_kWh / full_energy_kWh * 100.0) if full_energy_kWh > 0 else 0.0
+
+                        st.markdown(
+                            f"Estimated usable SOC window from LFP OCV curve: **{usable_soc_pct:.1f}%** "
+                            f"({soc_min*100:.1f}% → {soc_max*100:.1f}%).  "
+                            f"Average cell voltage over this window ≈ **{avg_voltage:.3f} V**."
+                        )
+
+                        cE1, cE2, cE3 = st.columns(3)
+                        cE1.metric(
+                            "Full theoretical energy (all cells healthy)",
+                            f"{full_energy_kWh:.1f} kWh",
+                        )
+                        cE2.metric(
+                            "Energy if weak cell(s) removed",
+                            f"{weak_energy_kWh:.1f} kWh",
+                        )
+                        cE3.metric(
+                            "Shortfall vs full design",
+                            f"{shortfall_kWh:.1f} kWh ({shortfall_pct:.2f} %)",
+                        )
+
+                        st.caption(
+                            "Based on an approximate **LFP OCV–SoC curve**, integrated between the SOC levels "
+                            "corresponding to your per-cell voltage cutoffs. "
+                            "This is still an approximation (real cells differ with temperature, rate, ageing), "
+                            "but it is more realistic than a simple linear voltage model."
+                        )
+
 # =================================================================
-# 🧩 CELL DETAIL TAB
+# MAIN SECTION: CELL DETAIL
 # =================================================================
-with tab_cells:
+elif main_section == "Cell Detail":
     st.subheader("Cell-Level Detail by Rack")
 
     st.write(
