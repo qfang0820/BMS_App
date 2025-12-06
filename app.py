@@ -146,41 +146,56 @@ st.caption(
 # =========================
 st.sidebar.header("📍 Navigation")
 
-# 1. Top-Level Page Selection
-main_page = st.sidebar.radio(
-    "Main Navigation",
-    ["BMS Overview", "Cell Detail"],
-    index=0,
+# Define the "Tree" structure options
+# We use a unique key for the widget to avoid state conflicts
+nav_options = [
+    "BMS Overview",  # This acts as the "Header" and the "Overview" page
+    "Energy",        # Indented child
+    "Cell Detail"    # Sibling to BMS Overview
+]
+
+# The Radio Button
+selection = st.sidebar.radio(
+    "Navigation Tree",
+    nav_options,
     label_visibility="collapsed",
-    key="main_page_nav"
+    key="nav_tree_selection",
+    # Custom Formatting to create the visual indentation
+    format_func=lambda x: f"⠀⠀• {x}" if x == "Energy" else x
 )
 
-# 2. Sub-Page Selection (Indented via text, not columns)
-if main_page == "BMS Overview":
-    # We use non-breaking spaces (\u00A0) to indent. 
-    # Standard spaces are often trimmed by Streamlit.
-    bms_subpage = st.sidebar.radio(
-        "BMS Subpage",
-        ["Overview", "Energy"],
-        index=0,
-        label_visibility="collapsed",
-        key="bms_subpage_nav",
-        format_func=lambda x: f"\u00A0\u00A0\u00A0\u00A0• {x}"  
-    )
-else:
+# ----------------------------------------------------
+# LOGIC MAPPING: Convert the single selection back 
+# into the variables your app expects (main_page, bms_subpage)
+# ----------------------------------------------------
+
+if selection == "BMS Overview":
+    main_page = "BMS Overview"
+    bms_subpage = "Overview"  # Default to Overview when parent is clicked
+
+elif selection == "Energy":
+    main_page = "BMS Overview"
+    bms_subpage = "Energy"
+
+elif selection == "Cell Detail":
+    main_page = "Cell Detail"
     bms_subpage = None
 
-# OPTIONAL: CSS to reduce the gap even further
-# This removes the default padding between the two radio widgets in the sidebar.
+# ----------------------------------------------------
+# OPTIONAL: CSS to tighten the list spacing
+# This makes "Energy" look closer to "BMS Overview"
+# ----------------------------------------------------
 st.markdown(
     """
     <style>
-        /* Target the radio buttons in the sidebar to reduce vertical space */
-        section[data-testid="stSidebar"] div.stRadio {
-            margin-bottom: -15px; /* Pulls the next item up */
+        div[data-testid="stSidebar"] div.stRadio > div[role="radiogroup"] > label {
+            margin-top: -8px; 
+            margin-bottom: -8px;
+            padding-top: 5px;
+            padding-bottom: 5px;
         }
     </style>
-    """,
+    """, 
     unsafe_allow_html=True
 )
 
