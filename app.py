@@ -147,7 +147,6 @@ st.caption(
 st.sidebar.header("📍 Navigation")
 
 # 1. Top-Level Page Selection
-#    This creates the "Roots" (BMS Overview, Cell Detail)
 main_page = st.sidebar.radio(
     "Main Navigation",
     ["BMS Overview", "Cell Detail"],
@@ -156,24 +155,34 @@ main_page = st.sidebar.radio(
     key="main_page_nav"
 )
 
-# 2. Sub-Page Selection (Indented)
-#    Only show this if "BMS Overview" is the active parent
+# 2. Sub-Page Selection (Indented via text, not columns)
 if main_page == "BMS Overview":
-    # Create an empty column on the left (0.1) to push the radio button right
-    _, col_indent = st.sidebar.columns([0.05, 0.95])
-    
-    with col_indent:
-        bms_subpage = st.radio(
-            "BMS Subpage",
-            ["Overview", "Energy"],
-            index=0,
-            label_visibility="collapsed",
-            key="bms_subpage_nav",
-            format_func=lambda x: f"• {x}"  # Adds the bullet point symbol
-        )
+    # We use non-breaking spaces (\u00A0) to indent. 
+    # Standard spaces are often trimmed by Streamlit.
+    bms_subpage = st.sidebar.radio(
+        "BMS Subpage",
+        ["Overview", "Energy"],
+        index=0,
+        label_visibility="collapsed",
+        key="bms_subpage_nav",
+        format_func=lambda x: f"\u00A0\u00A0\u00A0\u00A0• {x}"  
+    )
 else:
-    # If we are on "Cell Detail", there is no subpage active
     bms_subpage = None
+
+# OPTIONAL: CSS to reduce the gap even further
+# This removes the default padding between the two radio widgets in the sidebar.
+st.markdown(
+    """
+    <style>
+        /* Target the radio buttons in the sidebar to reduce vertical space */
+        section[data-testid="stSidebar"] div.stRadio {
+            margin-bottom: -15px; /* Pulls the next item up */
+        }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
 st.sidebar.markdown("---")
 
