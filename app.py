@@ -928,6 +928,85 @@ elif main_page == "Rack Level":
                     f"Lowest cell #{int(row_min['Lowest cell voltage position'])})."
                 )
 
+            # -------- Energy subsection for this BCMU --------
+            st.markdown("**Rack Energy (This BCMU)**")
+
+            if df["__time__"].nunique() < 2:
+                st.info("Not enough time points to compute energy for this rack.")
+            else:
+                t_min = df["__time__"].min()
+                t_max = df["__time__"].max()
+
+                start_t, end_t = st.select_slider(
+                    f"Select time range for BCMU {int(bcmu)}",
+                    options=list(df["__time__"]),
+                    value=(t_min, t_max),
+                    key=f"rack_energy_slider_{int(bcmu)}",
+                )
+
+                if start_t >= end_t:
+                    st.warning("Start time must be before end time.")
+                else:
+                    df_energy = df[(df["__time__"] >= start_t) & (df["__time__"] <= end_t)].copy()
+
+                    if len(df_energy) < 2:
+                        st.warning("Not enough points in this time range to compute energy.")
+                    else:
+                        # dt in hours
+                        df_energy["dt_h"] = df_energy["__time__"].shift(-1) - df_energy["__time__"]
+                        df_energy["dt_h"] = df_energy["dt_h"].dt.total_seconds().fillna(0) / 3600.0
+
+                        # Power in kW: V * A / 1000
+                        df_energy["power_kW"] = (
+                            df_energy["Total voltage"] * df_energy["Current"] / 1000.0
+                        )
+                        df_energy["dE_kWh"] = df_energy["power_kW"] * df_energy["dt_h"]
+
+                        energy_out_kWh = df_energy.loc[df_energy["power_kW"] > 0, "dE_kWh"].sum()
+                        energy_in_kWh = -df_energy.loc[df_energy["power_kW"] < 0, "dE_kWh"].sum()
+                        net_energy_kWh = energy_out_kWh - energy_in_kWh
+
+                        e1, e2, e3 = st.columns(3)
+                        e1.metric(f"Energy OUT (Discharge)", f"{energy_out_kWh:.2f} kWh")
+                        e2.metric(f"Energy IN (Charge)", f"{energy_in_kWh:.2f} kWh")
+                        e3.metric(f"Net Energy (OUT - IN)", f"{net_energy_kWh:.2f} kWh")
+
+                        st.caption(
+                            f"BCMU {int(bcmu)} time window: "
+                            f"{start_t.strftime('%Y-%m-%d %H:%M:%S')} → "
+                            f"{end_t.strftime('%Y-%m-%d %H:%M:%S')} "
+                            f"({(end_t - start_t).total_seconds()/3600.0:.2f} hours)"
+                        )
+
+                        fig_pwr_rack = px.line(
+                            df_energy,
+                            x="__time__",
+                            y="power_kW",
+                            title=f"Rack Power (kW) for BCMU {int(bcmu)}",
+                        )
+                        fig_pwr_rack.update_layout(
+                            xaxis_title="Time",
+                            yaxis_title="Power (kW)",
+                        )
+                        st.plotly_chart(fig_pwr_rack, use_container_width=True)
+
+                        with st.expander(f"Show energy calculation table for BCMU {int(bcmu)} (first 200 rows)"):
+                            st.dataframe(
+                                df_energy[
+                                    ["__time__", "Total voltage", "Current", "power_kW", "dt_h", "dE_kWh"]
+                                ].rename(
+                                    columns={
+                                        "__time__": "Time",
+                                        "Total voltage": "Rack Voltage (V)",
+                                        "Current": "Rack Current (A)",
+                                        "power_kW": "Power (kW)",
+                                        "dt_h": "Δt (h)",
+                                        "dE_kWh": "ΔE (kWh)",
+                                    }
+                                ).head(200)
+                            )
+
+            # -------- Raw data for this BCMU --------
             with st.expander(f"Show rack-level data for BCMU {int(bcmu)} (first 200 rows)"):
                 view_cols = [
                     "__time__",
@@ -947,7 +1026,6 @@ elif main_page == "Rack Level":
                     .rename(columns={"__time__": "Time", "SOC": "SOC (%)"})
                     .head(200)
                 )
-
 
 # =================================================================
 # MAIN SECTION: CELL DETAIL
