@@ -281,6 +281,7 @@ tab_bms_overview, tab_bms_energy, tab_cells = st.tabs(
 # BMS OVERVIEW TAB
 # =================================================================
 with tab_bms_overview:
+    st.subheader("BMS Pack-Level Overview")
 
     if bms_file is None and bms_df is None:
         st.info("Upload a **BMS log** in the sidebar to use this section.")
@@ -297,6 +298,10 @@ with tab_bms_overview:
         min_cell_v_col = "MIN CELL"
         second_max_col = "2nd MAX CELL" if bms_has_2nd_max else None
         second_min_col = "2nd MIN CELL" if bms_has_2nd_min else None
+
+        st.markdown("### Raw BMS Data Preview")
+        st.dataframe(df.head(50))
+        st.caption(f"Rows: {df.shape[0]}, Columns: {df.shape[1]}")
 
         st.markdown("### Key Metrics")
         c1, c2, c3, c4 = st.columns(4)
@@ -318,6 +323,31 @@ with tab_bms_overview:
                 "SoC Range",
                 f"{df[soc_col].min():.1f} % → {df[soc_col].max():.1f} %",
             )
+
+        st.markdown("### Basic Checks")
+
+        issues = []
+        min_cell_min = df[min_cell_v_col].min()
+        soc_min = df[soc_col].min()
+        delta_max = df["cell_delta"].max()
+
+        if min_cell_min < MIN_CELL_CRIT:
+            issues.append(f"⚠️ Min cell < {MIN_CELL_CRIT:.2f} V (lowest: {min_cell_min:.3f} V).")
+
+        if soc_min < SOC_CRIT:
+            issues.append(f"⚠️ SoC < {SOC_CRIT:.1f}% (lowest: {soc_min:.1f} %).")
+
+        if delta_max > DELTA_WARN:
+            issues.append(f"⚠️ Cell delta > {DELTA_WARN:.2f} V (max: {delta_max:.3f} V).")
+
+        if not issues:
+            st.success("✅ No basic issues detected with current thresholds.")
+        else:
+            for msg in issues:
+                st.warning(msg)
+
+        st.markdown("---")
+        st.markdown("### Trends Over Time")
 
         # Stack voltage
         fig_pack = px.line(
