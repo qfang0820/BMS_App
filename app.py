@@ -146,50 +146,54 @@ st.caption(
 # =========================
 st.sidebar.header("📍 Navigation")
 
-# ── Top-level pages ─────────────────────────────
-# Label hidden so it doesn't show "Main section"
+# 1. Top-Level Page Selection
+#    This creates the "Roots" (BMS Overview, Cell Detail)
 main_page = st.sidebar.radio(
-    "",
+    "Main Navigation",
     ["BMS Overview", "Cell Detail"],
     index=0,
-    key="main_page",
     label_visibility="collapsed",
+    key="main_page_nav"
 )
 
-# Little helper text to look like your tree
+# 2. Sub-Page Selection (Indented)
+#    Only show this if "BMS Overview" is the active parent
 if main_page == "BMS Overview":
-    # Indented title for sub-pages
-    st.sidebar.markdown("&nbsp;&nbsp;&nbsp;**BMS Overview**", unsafe_allow_html=True)
-    bms_subpage = st.sidebar.radio(
-        "",
-        ["Overview", "Energy"],
-        index=0,
-        key="bms_subpage",
-        label_visibility="collapsed",
-    )
+    # Create an empty column on the left (0.1) to push the radio button right
+    _, col_indent = st.sidebar.columns([0.05, 0.95])
+    
+    with col_indent:
+        bms_subpage = st.radio(
+            "BMS Subpage",
+            ["Overview", "Energy"],
+            index=0,
+            label_visibility="collapsed",
+            key="bms_subpage_nav",
+            format_func=lambda x: f"• {x}"  # Adds the bullet point symbol
+        )
 else:
-    bms_subpage = None  # not used on Cell Detail page
+    # If we are on "Cell Detail", there is no subpage active
+    bms_subpage = None
 
 st.sidebar.markdown("---")
 
 # ── File upload (collapsible) ───────────────────
+# (Keep your existing file upload code below this line...)
 with st.sidebar.expander("📁 Upload Data", expanded=False):
+    # ... rest of your upload code ...
     bms_file = st.file_uploader(
         "BMS pack-level log (.csv, .xlsx, .xls)",
         type=["csv", "xlsx", "xls"],
         key="bms_file",
     )
-
     cell_file = st.file_uploader(
         "Cell-level combined data (.csv, .xlsx, .xls) – (currently unused)",
         type=["csv", "xlsx", "xls"],
         key="cell_file",
     )
-
     st.caption(
         "Upload BMS logs for pack analysis, and rack-level files on the **Cell Detail** page."
     )
-
 # =========================
 # Constants for BMS analysis
 # =========================
