@@ -138,21 +138,24 @@ st.caption(
 )
 
 # =========================
-# Sidebar: Navigation (always visible) + File upload (collapsible)
+# Sidebar: Navigation + Upload
 # =========================
-st.sidebar.header("📍 Navigation")
 
-main_section = st.sidebar.radio(
-    "Main section",
+st.sidebar.header("Navigation")
+
+# Main navigation
+main_page = st.sidebar.radio(
+    "Go to:",
     ["BMS Overview", "Cell Detail"],
     index=0,
-    key="main_section",
+    key="main_page",
 )
 
+# Sub-navigation ONLY when BMS Overview is selected
 bms_subpage = None
-if main_section == "BMS Overview":
+if main_page == "BMS Overview":
     bms_subpage = st.sidebar.radio(
-        "BMS Overview pages",
+        "BMS Overview:",
         ["Overview", "Energy"],
         index=0,
         key="bms_subpage",
@@ -160,7 +163,7 @@ if main_section == "BMS Overview":
 
 st.sidebar.markdown("---")
 
-# 📁 File upload area inside an expander (can be hidden with arrow)
+# File upload collapsible section
 with st.sidebar.expander("📁 Upload Data", expanded=False):
     bms_file = st.file_uploader(
         "BMS pack-level log (.csv, .xlsx, .xls)",
@@ -175,9 +178,8 @@ with st.sidebar.expander("📁 Upload Data", expanded=False):
     )
 
     st.caption(
-        "Upload your BMS log for pack-level analysis, and rack cell files on the **Cell Detail** page."
+        "Upload BMS logs for pack analysis, and rack-level files under the Cell Detail page."
     )
-
 
 # =========================
 # Constants for BMS analysis
