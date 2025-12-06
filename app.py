@@ -150,7 +150,7 @@ st.sidebar.header("📍 Navigation")
 # We use a unique key for the widget to avoid state conflicts
 nav_options = [
     "BMS Overview",  # This acts as the "Header" and the "Overview" page
-    "Energy",        # Indented child
+        "Energy",        # Indented child
     "Cell Detail"    # Sibling to BMS Overview
 ]
 
@@ -180,24 +180,6 @@ elif selection == "Energy":
 elif selection == "Cell Detail":
     main_page = "Cell Detail"
     bms_subpage = None
-
-# ----------------------------------------------------
-# OPTIONAL: CSS to tighten the list spacing
-# This makes "Energy" look closer to "BMS Overview"
-# ----------------------------------------------------
-st.markdown(
-    """
-    <style>
-        div[data-testid="stSidebar"] div.stRadio > div[role="radiogroup"] > label {
-            margin-top: -8px; 
-            margin-bottom: -8px;
-            padding-top: 5px;
-            padding-bottom: 5px;
-        }
-    </style>
-    """, 
-    unsafe_allow_html=True
-)
 
 st.sidebar.markdown("---")
 
