@@ -387,13 +387,6 @@ if rack_level_file is not None:
                 "BCMU ID",
                 "Total voltage",
                 "Current",
-                "SOC(0.1%)",
-                "Average voltage",
-                "Highest cell voltage",
-                "Highest cell voltage position",
-                "Lowest cell voltage",
-                "Lowest cell voltage position",
-                "Cell voltage difference",
             ]
             missing_r = [c for c in required_rack_cols if c not in rdf.columns]
             if missing_r:
