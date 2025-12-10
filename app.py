@@ -261,10 +261,31 @@ with st.sidebar.expander("📁 Upload Data", expanded=False):
         type=["csv", "xlsx", "xls"],
         key="rack_level_file",
     )
+
+    st.markdown("### BMS file units")
+    st.checkbox(
+        "BMS data already in V / A / % / V (no ×10 / mV scaling)",
+        value=False,
+        key="bms_eng_units",
+        help="If checked, Stack voltage, Stack current, SOC, MAX/MIN CELL are already engineering units.",
+    )
+
+    st.markdown("### Rack-level file units")
+    st.checkbox(
+        "Rack-level data already in V / A / % / V (no ×10 / mV scaling)",
+        value=False,
+        key="rack_eng_units",
+        help="If checked, Total voltage, Current, SOC, Average/Highest/Lowest/Diff are already engineering units.",
+    )
+
     st.caption(
         "Upload BMS logs for pack analysis, rack-level logs for rack analysis, "
         "and rack cell files on the **Cell Detail** page."
     )
+
+# Read unit-mode flags from session state
+bms_eng_units = st.session_state.get("bms_eng_units", False)
+rack_eng_units = st.session_state.get("rack_eng_units", False)
 
 # =========================
 # Constants for BMS analysis
@@ -317,18 +338,31 @@ if bms_file is not None:
                 bms_has_2nd_max = "2nd MAX CELL" in df.columns
                 bms_has_2nd_min = "2nd MIN CELL" in df.columns
 
-                # Scaling
-                df["Stack voltage"] = pd.to_numeric(df["Stack voltage"], errors="coerce") / 10
-                df["Stack current"] = pd.to_numeric(df["Stack current"], errors="coerce") / 10
-                df["SOC"] = pd.to_numeric(df["SOC"], errors="coerce") / 10
+                # Scaling / numeric according to units mode
+                if bms_eng_units:
+                    # Already in engineering units
+                    df["Stack voltage"] = pd.to_numeric(df["Stack voltage"], errors="coerce")
+                    df["Stack current"] = pd.to_numeric(df["Stack current"], errors="coerce")
+                    df["SOC"] = pd.to_numeric(df["SOC"], errors="coerce")
+                    df["MAX CELL"] = pd.to_numeric(df["MAX CELL"], errors="coerce")
+                    df["MIN CELL"] = pd.to_numeric(df["MIN CELL"], errors="coerce")
+                    if bms_has_2nd_max:
+                        df["2nd MAX CELL"] = pd.to_numeric(df["2nd MAX CELL"], errors="coerce")
+                    if bms_has_2nd_min:
+                        df["2nd MIN CELL"] = pd.to_numeric(df["2nd MIN CELL"], errors="coerce")
+                else:
+                    # Raw units: V×10, A×10, SOC×10, cells in mV
+                    df["Stack voltage"] = pd.to_numeric(df["Stack voltage"], errors="coerce") / 10
+                    df["Stack current"] = pd.to_numeric(df["Stack current"], errors="coerce") / 10
+                    df["SOC"] = pd.to_numeric(df["SOC"], errors="coerce") / 10
 
-                df["MAX CELL"] = pd.to_numeric(df["MAX CELL"], errors="coerce") / 1000
-                df["MIN CELL"] = pd.to_numeric(df["MIN CELL"], errors="coerce") / 1000
+                    df["MAX CELL"] = pd.to_numeric(df["MAX CELL"], errors="coerce") / 1000
+                    df["MIN CELL"] = pd.to_numeric(df["MIN CELL"], errors="coerce") / 1000
 
-                if bms_has_2nd_max:
-                    df["2nd MAX CELL"] = pd.to_numeric(df["2nd MAX CELL"], errors="coerce") / 1000
-                if bms_has_2nd_min:
-                    df["2nd MIN CELL"] = pd.to_numeric(df["2nd MIN CELL"], errors="coerce") / 1000
+                    if bms_has_2nd_max:
+                        df["2nd MAX CELL"] = pd.to_numeric(df["2nd MAX CELL"], errors="coerce") / 1000
+                    if bms_has_2nd_min:
+                        df["2nd MIN CELL"] = pd.to_numeric(df["2nd MIN CELL"], errors="coerce") / 1000
 
                 time_col = "Time"
                 pack_v_col = "Stack voltage"
@@ -404,15 +438,26 @@ if rack_level_file is not None:
                 rdf = rdf.dropna(subset=["__time__"])
                 rdf = rdf.sort_values("__time__")
 
-                # Scale mandatory columns
-                rdf["Total voltage"] = pd.to_numeric(rdf["Total voltage"], errors="coerce") / 10.0
-                rdf["Current"] = pd.to_numeric(rdf["Current"], errors="coerce") / 10.0
+                # Scale mandatory columns according to units mode
+                if rack_eng_units:
+                    rdf["Total voltage"] = pd.to_numeric(rdf["Total voltage"], errors="coerce")
+                    rdf["Current"] = pd.to_numeric(rdf["Current"], errors="coerce")
+                else:
+                    rdf["Total voltage"] = pd.to_numeric(rdf["Total voltage"], errors="coerce") / 10.0
+                    rdf["Current"] = pd.to_numeric(rdf["Current"], errors="coerce") / 10.0
 
-                # Optional: SOC(0.1%) -> SOC
-                if "SOC(0.1%)" in rdf.columns:
-                    rdf["SOC"] = pd.to_numeric(rdf["SOC(0.1%)"], errors="coerce") / 10.0
+                # SOC handling:
+                if "SOC" in rdf.columns:
+                    rdf["SOC"] = pd.to_numeric(rdf["SOC"], errors="coerce")
+                elif "SOC(0.1%)" in rdf.columns:
+                    if rack_eng_units:
+                        # Treat as already in %
+                        rdf["SOC"] = pd.to_numeric(rdf["SOC(0.1%)"], errors="coerce")
+                    else:
+                        # Raw 0.1% units
+                        rdf["SOC"] = pd.to_numeric(rdf["SOC(0.1%)"], errors="coerce") / 10.0
 
-                # Optional voltage-related columns in mV
+                # Optional voltage-related columns: may be mV (raw) or V (engineering)
                 opt_mv_cols = [
                     "Average voltage",
                     "Highest cell voltage",
@@ -421,7 +466,10 @@ if rack_level_file is not None:
                 ]
                 for col in opt_mv_cols:
                     if col in rdf.columns:
-                        rdf[col] = pd.to_numeric(rdf[col], errors="coerce") / 1000.0
+                        if rack_eng_units:
+                            rdf[col] = pd.to_numeric(rdf[col], errors="coerce")
+                        else:
+                            rdf[col] = pd.to_numeric(rdf[col], errors="coerce") / 1000.0
 
                 # Optional position columns
                 if "Highest cell voltage position" in rdf.columns:
@@ -1000,7 +1048,7 @@ elif main_page == "Rack Level":
                         df_view = df_view.rename(columns={"SOC": "SOC (%)"})
                     st.dataframe(df_view.head(200))
 
-              # -----------------------------
+        # -----------------------------
         # RACK LEVEL → ENERGY SUBPAGE
         # -----------------------------
         elif rack_subpage == "Energy":
@@ -1067,9 +1115,7 @@ elif main_page == "Rack Level":
                             )
                             df_energy["dE_kWh"] = df_energy["power_kW"] * df_energy["dt_h"]
 
-                            # ------------------------------------------------------------------
-                            # CASE 1: Single BCMU (same behavior as before, with metrics)
-                            # ------------------------------------------------------------------
+                            # CASE 1: Single BCMU – same behavior as before
                             if selected_bcmu != "All BCMU":
                                 energy_out_kWh = df_energy.loc[
                                     df_energy["power_kW"] > 0, "dE_kWh"
@@ -1128,11 +1174,8 @@ elif main_page == "Rack Level":
                                         ).head(200)
                                     )
 
-                            # ------------------------------------------------------------------
-                            # CASE 2: All BCMU – overlay all racks on the same plot
-                            # ------------------------------------------------------------------
+                            # CASE 2: All BCMU – overlay all racks & show per-BCMU table
                             else:
-                                # Per-BCMU energy summary within the selected range
                                 summary_rows = []
                                 for bcmu in bcmu_ids:
                                     df_b = df_energy[df_energy["BCMU ID"] == bcmu].copy()
@@ -1172,7 +1215,6 @@ elif main_page == "Rack Level":
                                     f"({(end_t - start_t).total_seconds()/3600.0:.2f} hours)"
                                 )
 
-                                # Plot all BCMU power traces together
                                 fig_all = px.line(
                                     df_energy,
                                     x="__time__",
@@ -1204,6 +1246,7 @@ elif main_page == "Rack Level":
                                         ].rename(
                                             columns={
                                                 "__time__": "Time",
+                                                "BCMU ID": "BCMU ID",
                                                 "Total voltage": "Rack Voltage (V)",
                                                 "Current": "Rack Current (A)",
                                                 "power_kW": "Power (kW)",
@@ -1212,7 +1255,6 @@ elif main_page == "Rack Level":
                                             }
                                         ).head(200)
                                     )
-
 
 # =================================================================
 # MAIN SECTION: CELL DETAIL
@@ -1223,7 +1265,7 @@ elif main_page == "Cell Detail":
     st.write(
         "Upload one file **per rack**. Each file should follow this format:\n"
         "- Columns: `Time`, `Serial number`, `V1..Vn` (e.g., V1–V396)\n"
-        "- Cell voltages in **mV** (e.g., 3350 = 3.350 V)\n"
+        "- Cell voltages in **mV** (e.g., 3350 = 3.350 V) or V if you uncheck the scaling box.\n"
         "- First valid `Time` + `Serial number` row is used as the base timestamp; "
         "other rows use `Serial number` as seconds offset."
     )
