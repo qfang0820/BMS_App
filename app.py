@@ -405,28 +405,6 @@ if rack_level_file is not None:
                 rdf["Current"] = pd.to_numeric(rdf["Current"], errors="coerce") / 10.0
                 rdf["SOC"] = pd.to_numeric(rdf["SOC(0.1%)"], errors="coerce") / 10.0
 
-                for col in [
-                    "Average voltage",
-                    "Highest cell voltage",
-                    "Lowest cell voltage",
-                    "Cell voltage difference",
-                ]:
-                    rdf[col] = pd.to_numeric(rdf[col], errors="coerce") / 1000.0
-
-                rdf["Highest cell voltage position"] = pd.to_numeric(
-                    rdf["Highest cell voltage position"], errors="coerce"
-                )
-                rdf["Lowest cell voltage position"] = pd.to_numeric(
-                    rdf["Lowest cell voltage position"], errors="coerce"
-                )
-                rdf = rdf.dropna(subset=["Total voltage", "Average voltage"])
-
-                if rdf.empty:
-                    rack_error = (
-                        "❌ After cleaning rack-level data, no valid rows remain with voltage values."
-                    )
-                else:
-                    rack_df = rdf
 
 # =================================================================
 # MAIN SECTION: BMS OVERVIEW
