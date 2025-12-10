@@ -1260,7 +1260,7 @@ elif main_page == "Rack Level":
                                     st.plotly_chart(fig_all, use_container_width=True)
 
                                     with st.expander(
-                                        "Show combined energy calculation table (first 100000 rows)"
+                                        "Show combined energy calculation table (first 500000 rows)"
                                     ):
                                         st.dataframe(
                                             df_all_energy[
@@ -1282,7 +1282,7 @@ elif main_page == "Rack Level":
                                                     "dt_h": "Δt (h)",
                                                     "dE_kWh": "ΔE (kWh)",
                                                 }
-                                            ).head(100000)
+                                            ).head(500000)
                                         )
                                 else:
                                     st.info("No combined energy rows to display for plotting.")
