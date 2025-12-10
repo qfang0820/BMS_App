@@ -116,7 +116,7 @@ cell_rows.append(row2)
 cell_template = pd.DataFrame(cell_rows, columns=cell_cols)
 cell_template_csv = cell_template.to_csv(index=False)
 
-# ---- Rack level template (based on rack-level structure) ----
+# ---- Rack level template (raw units, rest optional) ----
 rack_template = pd.DataFrame(
     [
         {
@@ -124,13 +124,13 @@ rack_template = pd.DataFrame(
             "BCMU ID": 1,
             "Total voltage": 13091,              # 1309.1 V after /10
             "Current": 0,                        # 0.0 A after /10
-            "SOC(0.1%)": 926,                    # 92.6 % after /10
-            "Average voltage": 3312,             # 3.312 V after /1000
-            "Highest cell voltage": 3315,        # 3.315 V
+            "SOC(0.1%)": 926,                    # 92.6 % after /10 (optional)
+            "Average voltage": 3312,             # 3.312 V after /1000 (optional)
+            "Highest cell voltage": 3315,        # 3.315 V (optional)
             "Highest cell voltage position": 148,
-            "Lowest cell voltage": 3310,         # 3.310 V
+            "Lowest cell voltage": 3310,         # 3.310 V (optional)
             "Lowest cell voltage position": 105,
-            "Cell voltage difference": 5,        # 0.005 V
+            "Cell voltage difference": 5,        # 0.005 V (optional)
         },
         {
             "Time": "2025-11-05 16:21:55",
@@ -192,7 +192,8 @@ with c_t3:
 st.caption(
     "- BMS template uses the **raw units** your app expects: Stack V /10, Current /10, SOC /10, Cells in mV.\n"
     "- Cell template uses `Time`, `Serial number`, and `V1..V396` in **mV** (e.g., 3350 = 3.350 V).\n"
-    "- Rack-level template uses rack summary data in **raw units**: Total V /10, voltages in mV, SOC(0.1%) /10."
+    "- Rack-level template uses rack summary data in **raw units**: Total V /10, voltages in mV, SOC(0.1%) /10. "
+    "Only `Time`, `BCMU ID`, `Total voltage` and `Current` are mandatory for analysis; the rest is optional."
 )
 
 # =========================
@@ -382,6 +383,7 @@ if rack_level_file is not None:
         else:
             rdf.columns = rdf.columns.str.strip()
 
+            # Only these are mandatory now
             required_rack_cols = [
                 "Time",
                 "BCMU ID",
@@ -397,14 +399,49 @@ if rack_level_file is not None:
                     + ", ".join(rdf.columns.astype(str))
                 )
             else:
+                # Time + sort
                 rdf["__time__"] = pd.to_datetime(rdf["Time"], errors="coerce")
                 rdf = rdf.dropna(subset=["__time__"])
                 rdf = rdf.sort_values("__time__")
 
+                # Scale mandatory columns
                 rdf["Total voltage"] = pd.to_numeric(rdf["Total voltage"], errors="coerce") / 10.0
                 rdf["Current"] = pd.to_numeric(rdf["Current"], errors="coerce") / 10.0
-                rdf["SOC"] = pd.to_numeric(rdf["SOC(0.1%)"], errors="coerce") / 10.0
 
+                # Optional: SOC(0.1%) -> SOC
+                if "SOC(0.1%)" in rdf.columns:
+                    rdf["SOC"] = pd.to_numeric(rdf["SOC(0.1%)"], errors="coerce") / 10.0
+
+                # Optional voltage-related columns in mV
+                opt_mv_cols = [
+                    "Average voltage",
+                    "Highest cell voltage",
+                    "Lowest cell voltage",
+                    "Cell voltage difference",
+                ]
+                for col in opt_mv_cols:
+                    if col in rdf.columns:
+                        rdf[col] = pd.to_numeric(rdf[col], errors="coerce") / 1000.0
+
+                # Optional position columns
+                if "Highest cell voltage position" in rdf.columns:
+                    rdf["Highest cell voltage position"] = pd.to_numeric(
+                        rdf["Highest cell voltage position"], errors="coerce"
+                    )
+                if "Lowest cell voltage position" in rdf.columns:
+                    rdf["Lowest cell voltage position"] = pd.to_numeric(
+                        rdf["Lowest cell voltage position"], errors="coerce"
+                    )
+
+                # Require at least valid Total voltage
+                rdf = rdf.dropna(subset=["Total voltage"])
+
+                if rdf.empty:
+                    rack_error = (
+                        "❌ After cleaning rack-level data, no valid rows remain with required values."
+                    )
+                else:
+                    rack_df = rdf
 
 # =================================================================
 # MAIN SECTION: BMS OVERVIEW
@@ -818,23 +855,45 @@ elif main_page == "Rack Level":
                 st.markdown(f"### BCMU ID {int(bcmu)} — Overview")
 
                 c1, c2, c3, c4 = st.columns(4)
+
+                # Always available
                 with c1:
                     st.metric("Rack Voltage Max", f"{df['Total voltage'].max():.2f} V")
                     st.metric("Rack Voltage Min", f"{df['Total voltage'].min():.2f} V")
 
+                # Average voltage metrics (optional)
                 with c2:
-                    st.metric("Avg Cell Voltage Max", f"{df['Average voltage'].max():.3f} V")
-                    st.metric("Avg Cell Voltage Min", f"{df['Average voltage'].min():.3f} V")
+                    if "Average voltage" in df.columns:
+                        avg_max = df["Average voltage"].max()
+                        avg_min = df["Average voltage"].min()
+                        st.metric("Avg Cell Voltage Max", f"{avg_max:.3f} V")
+                        st.metric("Avg Cell Voltage Min", f"{avg_min:.3f} V")
+                    else:
+                        st.metric("Avg Cell Voltage Max", "N/A")
+                        st.metric("Avg Cell Voltage Min", "N/A")
 
+                # Delta metrics (optional)
                 with c3:
-                    st.metric("Max ΔCell V", f"{df['Cell voltage difference'].max():.3f} V")
-                    st.metric("Min ΔCell V", f"{df['Cell voltage difference'].min():.3f} V")
+                    if "Cell voltage difference" in df.columns:
+                        dmax = df["Cell voltage difference"].max()
+                        dmin = df["Cell voltage difference"].min()
+                        st.metric("Max ΔCell V", f"{dmax:.3f} V")
+                        st.metric("Min ΔCell V", f"{dmin:.3f} V")
+                    else:
+                        st.metric("Max ΔCell V", "N/A")
+                        st.metric("Min ΔCell V", "N/A")
 
+                # SOC range (optional)
                 with c4:
-                    st.metric(
-                        "SOC Range",
-                        f"{df['SOC'].min():.1f} % → {df['SOC'].max():.1f} %",
-                    )
+                    if "SOC" in df.columns:
+                        soc_min = df["SOC"].min()
+                        soc_max = df["SOC"].max()
+                        st.metric(
+                            "SOC Range",
+                            f"{soc_min:.1f} % → {soc_max:.1f} %",
+                        )
+                    else:
+                        st.metric("SOC Range", "N/A")
 
                 st.markdown("**Rack Voltage and Average Cell Voltage**")
 
@@ -847,73 +906,86 @@ elif main_page == "Rack Level":
                 fig_rack_v.update_layout(xaxis_title="Time", yaxis_title="Voltage (V)")
                 st.plotly_chart(fig_rack_v, use_container_width=True)
 
-                fig_avg = px.line(
-                    df,
-                    x="__time__",
-                    y="Average voltage",
-                    title=f"Average Cell Voltage Over Time (BCMU {int(bcmu)})",
-                )
-                fig_avg.update_layout(xaxis_title="Time", yaxis_title="Average Cell Voltage (V)")
-                st.plotly_chart(fig_avg, use_container_width=True)
-
-                st.markdown("**Highest / Lowest Cell Voltage Over Time**")
-
-                fig_hi_lo = px.line(
-                    df,
-                    x="__time__",
-                    y=["Highest cell voltage", "Lowest cell voltage"],
-                    title=f"Highest and Lowest Cell Voltages Over Time (BCMU {int(bcmu)})",
-                )
-                fig_hi_lo.update_layout(
-                    xaxis_title="Time",
-                    yaxis_title="Cell Voltage (V)",
-                    legend_title="Series",
-                )
-                st.plotly_chart(fig_hi_lo, use_container_width=True)
-
-                st.markdown("**Cell Voltage Difference (Imbalance)**")
-
-                fig_diff = px.line(
-                    df,
-                    x="__time__",
-                    y="Cell voltage difference",
-                    title=f"Cell Voltage Difference Over Time (BCMU {int(bcmu)})",
-                )
-                fig_diff.update_layout(
-                    xaxis_title="Time",
-                    yaxis_title="Voltage Difference (V)",
-                )
-                st.plotly_chart(fig_diff, use_container_width=True)
-
-                st.markdown("**Extreme Cell Positions (This BCMU)**")
-
-                idx_max_diff = df["Cell voltage difference"].idxmax()
-                idx_min_diff = df["Cell voltage difference"].idxmin()
-
-                if pd.notna(idx_max_diff):
-                    row_max = df.loc[idx_max_diff]
-                    st.write(
-                        f"- Max ΔCell V: **{row_max['Cell voltage difference']:.3f} V** at "
-                        f"{row_max['__time__']} "
-                        f"(Highest cell #{int(row_max['Highest cell voltage position'])}, "
-                        f"Lowest cell #{int(row_max['Lowest cell voltage position'])})."
+                if "Average voltage" in df.columns:
+                    fig_avg = px.line(
+                        df,
+                        x="__time__",
+                        y="Average voltage",
+                        title=f"Average Cell Voltage Over Time (BCMU {int(bcmu)})",
                     )
+                    fig_avg.update_layout(xaxis_title="Time", yaxis_title="Average Cell Voltage (V)")
+                    st.plotly_chart(fig_avg, use_container_width=True)
 
-                if pd.notna(idx_min_diff):
-                    row_min = df.loc[idx_min_diff]
-                    st.write(
-                        f"- Min ΔCell V: **{row_min['Cell voltage difference']:.3f} V** at "
-                        f"{row_min['__time__']} "
-                        f"(Highest cell #{int(row_min['Highest cell voltage position'])}, "
-                        f"Lowest cell #{int(row_min['Lowest cell voltage position'])})."
+                if "Highest cell voltage" in df.columns and "Lowest cell voltage" in df.columns:
+                    st.markdown("**Highest / Lowest Cell Voltage Over Time**")
+
+                    fig_hi_lo = px.line(
+                        df,
+                        x="__time__",
+                        y=["Highest cell voltage", "Lowest cell voltage"],
+                        title=f"Highest and Lowest Cell Voltages Over Time (BCMU {int(bcmu)})",
                     )
+                    fig_hi_lo.update_layout(
+                        xaxis_title="Time",
+                        yaxis_title="Cell Voltage (V)",
+                        legend_title="Series",
+                    )
+                    st.plotly_chart(fig_hi_lo, use_container_width=True)
+
+                if "Cell voltage difference" in df.columns:
+                    st.markdown("**Cell Voltage Difference (Imbalance)**")
+
+                    fig_diff = px.line(
+                        df,
+                        x="__time__",
+                        y="Cell voltage difference",
+                        title=f"Cell Voltage Difference Over Time (BCMU {int(bcmu)})",
+                    )
+                    fig_diff.update_layout(
+                        xaxis_title="Time",
+                        yaxis_title="Voltage Difference (V)",
+                    )
+                    st.plotly_chart(fig_diff, use_container_width=True)
+
+                    st.markdown("**Extreme Cell Positions (This BCMU)**")
+
+                    idx_max_diff = df["Cell voltage difference"].idxmax()
+                    idx_min_diff = df["Cell voltage difference"].idxmin()
+
+                    if pd.notna(idx_max_diff):
+                        row_max = df.loc[idx_max_diff]
+                        msg = (
+                            f"- Max ΔCell V: **{row_max['Cell voltage difference']:.3f} V** at "
+                            f"{row_max['__time__']}"
+                        )
+                        if "Highest cell voltage position" in df.columns and "Lowest cell voltage position" in df.columns:
+                            msg += (
+                                f" (Highest cell #{int(row_max['Highest cell voltage position'])}, "
+                                f"Lowest cell #{int(row_max['Lowest cell voltage position'])})."
+                            )
+                        st.write(msg)
+
+                    if pd.notna(idx_min_diff):
+                        row_min = df.loc[idx_min_diff]
+                        msg = (
+                            f"- Min ΔCell V: **{row_min['Cell voltage difference']:.3f} V** at "
+                            f"{row_min['__time__']}"
+                        )
+                        if "Highest cell voltage position" in df.columns and "Lowest cell voltage position" in df.columns:
+                            msg += (
+                                f" (Highest cell #{int(row_min['Highest cell voltage position'])}, "
+                                f"Lowest cell #{int(row_min['Lowest cell voltage position'])})."
+                            )
+                        st.write(msg)
 
                 with st.expander(f"Show rack-level data for BCMU {int(bcmu)} (first 200 rows)"):
-                    view_cols = [
+                    base_cols = [
                         "__time__",
                         "BCMU ID",
                         "Total voltage",
                         "Current",
+                    ]
+                    opt_cols = [
                         "SOC",
                         "Average voltage",
                         "Highest cell voltage",
@@ -922,11 +994,11 @@ elif main_page == "Rack Level":
                         "Lowest cell voltage position",
                         "Cell voltage difference",
                     ]
-                    st.dataframe(
-                        df[view_cols]
-                        .rename(columns={"__time__": "Time", "SOC": "SOC (%)"})
-                        .head(200)
-                    )
+                    view_cols = base_cols + [c for c in opt_cols if c in df.columns]
+                    df_view = df[view_cols].rename(columns={"__time__": "Time"})
+                    if "SOC" in df_view.columns:
+                        df_view = df_view.rename(columns={"SOC": "SOC (%)"})
+                    st.dataframe(df_view.head(200))
 
         # -----------------------------
         # RACK LEVEL → ENERGY SUBPAGE
