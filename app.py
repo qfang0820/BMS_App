@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from datetime import datetime
 from io import StringIO
 
 # =========================
@@ -9,15 +8,14 @@ from io import StringIO
 # =========================
 st.set_page_config(page_title="BMS + Cell Analyzer", layout="wide")
 
+
 # =========================
 # Simple login using Streamlit secrets
 # =========================
 def login():
-    # Initialize session state
     if "logged_in" not in st.session_state:
         st.session_state.logged_in = False
 
-    # If already logged in, just return
     if st.session_state.logged_in:
         return
 
@@ -29,38 +27,72 @@ def login():
         submit = st.form_submit_button("Login")
 
     if submit:
-        # Defaults to empty string if secrets are not set up
         correct_user = st.secrets.get("APP_USERNAME", "")
         correct_pass = st.secrets.get("APP_PASSWORD", "")
 
         if username == correct_user and password == correct_pass:
             st.session_state.logged_in = True
             st.success("Login successful. Loading app...")
-            st.rerun()  # Rerun to refresh the page and show the app
+            st.rerun()
         else:
             st.error("Invalid username or password.")
 
-    # If not logged in yet, stop the app here
     if not st.session_state.logged_in:
         st.stop()
 
-# Call login before showing the main app
+
 login()
 
 st.title("BMS + Cell Analyzer")
+
+# =========================
+# Helpers
+# =========================
+def read_any_table(uploaded_file: st.runtime.uploaded_file_manager.UploadedFile) -> pd.DataFrame:
+    fname = uploaded_file.name.lower()
+    if fname.endswith((".xlsx", ".xls")):
+        return pd.read_excel(uploaded_file)
+    return pd.read_csv(uploaded_file)
+
+
+def clean_numeric_series(s: pd.Series) -> pd.Series:
+    """
+    Robust numeric parser:
+    - Handles commas: '3,450'
+    - Handles units: '3450mV', '3.45 V'
+    - Handles stray text like 'SOC=503'
+    - Keeps leading minus sign
+    """
+    if s is None:
+        return pd.Series(dtype="float64")
+
+    s = s.astype(str).str.strip()
+    s = s.str.replace(",", "", regex=False)          # 3,450 -> 3450
+    s = s.str.replace("\u00a0", " ", regex=False)    # NBSP -> space
+
+    extracted = s.str.extract(r"([-+]?\d*\.?\d+)", expand=False)
+    return pd.to_numeric(extracted, errors="coerce")
+
+
+def cell_index(name: str) -> int:
+    try:
+        return int(name[1:])
+    except Exception:
+        return 0
+
 
 # =========================
 # Downloadable templates
 # =========================
 st.markdown("### Download sample upload templates")
 
-# ---- BMS template (raw units like your real files) ----
+# ---- BMS template (raw units) ----
 bms_template = pd.DataFrame(
     [
         {
             "Time": "2025-11-11 10:00:00",
             "Stack voltage": 3450,      # 345.0 V after /10
-            "Stack current": -120,      # -12.0 A after /10 (discharge)
+            "Stack current": -120,      # -12.0 A after /10
             "SOC": 503,                 # 50.3 % after /10
             "MAX CELL": 3350,           # 3.350 V after /1000
             "MIN CELL": 3320,           # 3.320 V after /1000
@@ -116,7 +148,7 @@ cell_rows.append(row2)
 cell_template = pd.DataFrame(cell_rows, columns=cell_cols)
 cell_template_csv = cell_template.to_csv(index=False)
 
-# ---- Rack level template (raw units, rest optional) ----
+# ---- Rack level template (raw units; only a few required) ----
 rack_template = pd.DataFrame(
     [
         {
@@ -134,85 +166,78 @@ rack_template = pd.DataFrame(
         },
         {
             "Time": "2025-11-05 16:21:55",
-            "BCMU ID": 1,
-            "Total voltage": 13091,
-            "Current": 0,
-            "SOC(0.1%)": 926,
-            "Average voltage": 3312,
-            "Highest cell voltage": 3315,
+            "BCMU ID": 2,
+            "Total voltage": 13100,
+            "Current": -15,                      # -1.5 A after /10
+            "SOC(0.1%)": 920,
+            "Average voltage": 3310,
+            "Highest cell voltage": 3316,
             "Highest cell voltage position": 102,
-            "Lowest cell voltage": 3309,
+            "Lowest cell voltage": 3308,
             "Lowest cell voltage position": 221,
-            "Cell voltage difference": 6,
+            "Cell voltage difference": 8,
         },
         {
             "Time": "2025-11-05 16:22:58",
             "BCMU ID": 1,
-            "Total voltage": 13091,
-            "Current": 0,
-            "SOC(0.1%)": 926,
-            "Average voltage": 3312,
+            "Total voltage": 13088,
+            "Current": 10,
+            "SOC(0.1%)": 925,
+            "Average voltage": 3311,
             "Highest cell voltage": 3315,
             "Highest cell voltage position": 16,
             "Lowest cell voltage": 3309,
-            "Lowest cell voltage position": 221,
+            "Lowest cell voltage position": 233,
             "Cell voltage difference": 6,
         },
     ]
 )
 rack_template_csv = rack_template.to_csv(index=False)
 
-# ---- Download buttons ----
-c_t1, c_t2, c_t3 = st.columns(3)
-with c_t1:
+c1, c2, c3 = st.columns(3)
+with c1:
     st.download_button(
-        label="⬇ Download BMS log template (CSV)",
-        data=bms_template_csv,
-        file_name="bms_template.csv",
-        mime="text/csv",
-        key="download_bms_template",
+        "⬇ Download BMS log template (CSV)",
+        bms_template_csv,
+        "bms_template.csv",
+        "text/csv",
+        key="dl_bms_template",
     )
-with c_t2:
+with c2:
     st.download_button(
-        label="⬇ Download rack cell data template (CSV)",
-        data=cell_template_csv,
-        file_name="cell_record_template.csv",
-        mime="text/csv",
-        key="download_cell_template",
+        "⬇ Download rack cell data template (CSV)",
+        cell_template_csv,
+        "cell_record_template.csv",
+        "text/csv",
+        key="dl_cell_template",
     )
-with c_t3:
+with c3:
     st.download_button(
-        label="⬇ Download rack-level log template (CSV)",
-        data=rack_template_csv,
-        file_name="rack_level_template.csv",
-        mime="text/csv",
-        key="download_rack_template",
+        "⬇ Download rack-level log template (CSV)",
+        rack_template_csv,
+        "rack_level_template.csv",
+        "text/csv",
+        key="dl_rack_template",
     )
 
 st.caption(
-    "- BMS template uses the **raw units** your app expects: Stack V /10, Current /10, SOC /10, Cells in mV.\n"
-    "- Cell template uses `Time`, `Serial number`, and `V1..V396` in **mV** (e.g., 3350 = 3.350 V).\n"
-    "- Rack-level template uses rack summary data in **raw units**: Total V /10, voltages in mV, SOC(0.1%) /10. "
-    "Only `Time`, `BCMU ID`, `Total voltage` and `Current` are mandatory for analysis; the rest is optional."
+    "- **BMS template** uses raw units: Stack V/10, Current/10, SOC/10, Cells in mV.\n"
+    "- **Cell template** uses `Time`, `Serial number`, `V1..V396` in mV.\n"
+    "- **Rack-level template** uses raw units; only `Time`, `BCMU ID`, `Total voltage`, `Current` are mandatory."
 )
 
 # =========================
-# Sidebar: Navigation + Upload
+# Sidebar: Navigation always visible + Upload collapsible
 # =========================
 st.sidebar.header("📍 Navigation")
 
 nav_options = [
-    "BMS Overview",   # parent / Overview
-    "Energy",         # child under BMS Overview
-    "Rack Level",     # parent / Overview
-    "Rack Energy",    # child under Rack Level
-    "Cell Detail",    # sibling
+    "BMS Overview",
+    "Energy",
+    "Rack Level",
+    "Rack Energy",
+    "Cell Detail",
 ]
-
-# Default values
-main_page = "BMS Overview"
-bms_subpage = "Overview"
-rack_subpage = None
 
 selection = st.sidebar.radio(
     "Navigation Tree",
@@ -222,78 +247,58 @@ selection = st.sidebar.radio(
     format_func=lambda x: f"⠀⠀• {x}" if x in ("Energy", "Rack Energy") else x,
 )
 
+main_page = None
+bms_subpage = None
+rack_subpage = None
+
 if selection == "BMS Overview":
-    main_page = "BMS Overview"
+    main_page = "BMS"
     bms_subpage = "Overview"
-    rack_subpage = None
-
 elif selection == "Energy":
-    main_page = "BMS Overview"
+    main_page = "BMS"
     bms_subpage = "Energy"
-    rack_subpage = None
-
 elif selection == "Rack Level":
-    main_page = "Rack Level"
+    main_page = "RACK"
     rack_subpage = "Overview"
-    bms_subpage = None
-
 elif selection == "Rack Energy":
-    main_page = "Rack Level"
+    main_page = "RACK"
     rack_subpage = "Energy"
-    bms_subpage = None
-
 elif selection == "Cell Detail":
-    main_page = "Cell Detail"
-    bms_subpage = None
-    rack_subpage = None
+    main_page = "CELL"
 
 st.sidebar.markdown("---")
 
-# File upload (collapsible)
 with st.sidebar.expander("📁 Upload Data", expanded=False):
+    st.markdown("### BMS (Pack-level)")
     bms_file = st.file_uploader(
-        "BMS pack-level log (.csv, .xlsx, .xls)",
+        "Upload BMS log (.csv, .xlsx, .xls)",
         type=["csv", "xlsx", "xls"],
-        key="bms_file",
+        key="upload_bms_file",
     )
-    rack_level_file = st.file_uploader(
-        "Rack-level log (.csv, .xlsx, .xls)",
-        type=["csv", "xlsx", "xls"],
-        key="rack_level_file",
-    )
-
-    st.markdown("### BMS file units")
-    st.checkbox(
-        "BMS data already in V / A / % / V (no ×10 / mV scaling)",
+    bms_eng_units = st.checkbox(
+        "BMS already in V / A / % / V (no scaling)",
         value=False,
         key="bms_eng_units",
-        help="If checked, Stack voltage, Stack current, SOC, MAX/MIN CELL are already engineering units.",
+        help="If checked: Stack voltage/current/SOC and MAX/MIN CELL are already engineering units.",
     )
 
-    st.markdown("### Rack-level file units")
-    st.checkbox(
-        "Rack-level data already in V / A / % / V (no ×10 / mV scaling)",
+    st.markdown("---")
+    st.markdown("### Rack-level")
+    rack_level_file = st.file_uploader(
+        "Upload Rack-level log (.csv, .xlsx, .xls)",
+        type=["csv", "xlsx", "xls"],
+        key="upload_rack_level_file",
+    )
+    rack_eng_units = st.checkbox(
+        "Rack-level already in V / A / % / V (no scaling)",
         value=False,
         key="rack_eng_units",
-        help="If checked, Total voltage, Current, SOC, Average/Highest/Lowest/Diff are already engineering units.",
+        help="If checked: Total voltage/current and optional cell voltages are already engineering units.",
     )
 
-    st.caption(
-        "Upload BMS logs for pack analysis, rack-level logs for rack analysis, "
-        "and rack cell files on the **Cell Detail** page."
-    )
+    st.markdown("---")
+    st.caption("Rack cell files are uploaded inside **Cell Detail** page (one file per rack).")
 
-# Read unit-mode flags from session state
-bms_eng_units = st.session_state.get("bms_eng_units", False)
-rack_eng_units = st.session_state.get("rack_eng_units", False)
-
-# =========================
-# Constants for BMS analysis
-# =========================
-MIN_CELL_CRIT = 2.50   # V
-SOC_CRIT = 5.0         # %
-DELTA_WARN = 0.30      # V
-IDLE_CURR = 2.0        # A
 
 # =========================
 # BMS data preparation
@@ -304,28 +309,17 @@ bms_has_2nd_max = False
 bms_has_2nd_min = False
 
 if bms_file is not None:
-    fname = bms_file.name.lower()
     try:
-        if fname.endswith((".xlsx", ".xls")):
-            df = pd.read_excel(bms_file)
-        else:
-            df = pd.read_csv(bms_file)
+        df = read_any_table(bms_file)
     except Exception as e:
         bms_error = f"❌ Error reading BMS file: {e}"
     else:
         if df.empty:
             bms_error = "❌ BMS file has no rows of data."
         else:
-            df.columns = df.columns.str.strip()
+            df.columns = df.columns.astype(str).str.strip()
 
-            required_cols = [
-                "Time",
-                "Stack voltage",
-                "Stack current",
-                "SOC",
-                "MAX CELL",
-                "MIN CELL",
-            ]
+            required_cols = ["Time", "Stack voltage", "Stack current", "SOC", "MAX CELL", "MIN CELL"]
             missing = [c for c in required_cols if c not in df.columns]
             if missing:
                 bms_error = (
@@ -338,63 +332,44 @@ if bms_file is not None:
                 bms_has_2nd_max = "2nd MAX CELL" in df.columns
                 bms_has_2nd_min = "2nd MIN CELL" in df.columns
 
-                # Scaling / numeric according to units mode
-                if bms_eng_units:
-                    # Already in engineering units
-                    df["Stack voltage"] = pd.to_numeric(df["Stack voltage"], errors="coerce")
-                    df["Stack current"] = pd.to_numeric(df["Stack current"], errors="coerce")
-                    df["SOC"] = pd.to_numeric(df["SOC"], errors="coerce")
-                    df["MAX CELL"] = pd.to_numeric(df["MAX CELL"], errors="coerce")
-                    df["MIN CELL"] = pd.to_numeric(df["MIN CELL"], errors="coerce")
-                    if bms_has_2nd_max:
-                        df["2nd MAX CELL"] = pd.to_numeric(df["2nd MAX CELL"], errors="coerce")
-                    if bms_has_2nd_min:
-                        df["2nd MIN CELL"] = pd.to_numeric(df["2nd MIN CELL"], errors="coerce")
-                else:
-                    # Raw units: V×10, A×10, SOC×10, cells in mV
-                    df["Stack voltage"] = pd.to_numeric(df["Stack voltage"], errors="coerce") / 10
-                    df["Stack current"] = pd.to_numeric(df["Stack current"], errors="coerce") / 10
-                    df["SOC"] = pd.to_numeric(df["SOC"], errors="coerce") / 10
+                # Time first
+                df["__time__"] = pd.to_datetime(df["Time"], errors="coerce")
+                df = df.dropna(subset=["__time__"]).sort_values("__time__")
 
-                    df["MAX CELL"] = pd.to_numeric(df["MAX CELL"], errors="coerce") / 1000
-                    df["MIN CELL"] = pd.to_numeric(df["MIN CELL"], errors="coerce") / 1000
-
-                    if bms_has_2nd_max:
-                        df["2nd MAX CELL"] = pd.to_numeric(df["2nd MAX CELL"], errors="coerce") / 1000
-                    if bms_has_2nd_min:
-                        df["2nd MIN CELL"] = pd.to_numeric(df["2nd MIN CELL"], errors="coerce") / 1000
-
-                time_col = "Time"
-                pack_v_col = "Stack voltage"
-                current_col = "Stack current"
-                soc_col = "SOC"
-                max_cell_v_col = "MAX CELL"
-                min_cell_v_col = "MIN CELL"
-                second_max_col = "2nd MAX CELL" if bms_has_2nd_max else None
-                second_min_col = "2nd MIN CELL" if bms_has_2nd_min else None
-
-                df["__time__"] = pd.to_datetime(df[time_col], errors="coerce")
-                df = df.dropna(subset=["__time__"])
-                df = df.sort_values("__time__")
-
-                numeric_cols = [pack_v_col, current_col, soc_col, max_cell_v_col, min_cell_v_col]
+                # Robust numeric parse
+                df["Stack voltage"] = clean_numeric_series(df["Stack voltage"])
+                df["Stack current"] = clean_numeric_series(df["Stack current"])
+                df["SOC"] = clean_numeric_series(df["SOC"])
+                df["MAX CELL"] = clean_numeric_series(df["MAX CELL"])
+                df["MIN CELL"] = clean_numeric_series(df["MIN CELL"])
                 if bms_has_2nd_max:
-                    numeric_cols.append(second_max_col)
+                    df["2nd MAX CELL"] = clean_numeric_series(df["2nd MAX CELL"])
                 if bms_has_2nd_min:
-                    numeric_cols.append(second_min_col)
+                    df["2nd MIN CELL"] = clean_numeric_series(df["2nd MIN CELL"])
 
-                for col in numeric_cols:
-                    df[col] = pd.to_numeric(df[col], errors="coerce")
+                # Scaling if raw
+                if not bms_eng_units:
+                    df["Stack voltage"] = df["Stack voltage"] / 10.0
+                    df["Stack current"] = df["Stack current"] / 10.0
+                    df["SOC"] = df["SOC"] / 10.0
+                    df["MAX CELL"] = df["MAX CELL"] / 1000.0
+                    df["MIN CELL"] = df["MIN CELL"] / 1000.0
+                    if bms_has_2nd_max:
+                        df["2nd MAX CELL"] = df["2nd MAX CELL"] / 1000.0
+                    if bms_has_2nd_min:
+                        df["2nd MIN CELL"] = df["2nd MIN CELL"] / 1000.0
 
-                df = df.dropna(subset=[pack_v_col, max_cell_v_col, min_cell_v_col])
-
+                # Final keep rows with required numeric values
+                df = df.dropna(subset=["Stack voltage", "MAX CELL", "MIN CELL"])
                 if df.empty:
                     bms_error = (
-                        "❌ After cleaning BMS data, no valid rows remain with voltage values."
+                        "❌ After cleaning BMS data, no valid rows remain with voltage values.\n\n"
+                        "Tip: Expand **🧪 BMS parsing diagnostics** below to see which column is all-NaN."
                     )
                 else:
-                    df["cell_delta"] = df[max_cell_v_col] - df[min_cell_v_col]
+                    df["cell_delta"] = df["MAX CELL"] - df["MIN CELL"]
                     bms_df = df
+
 
 # =========================
 # Rack-level data preparation
@@ -403,28 +378,19 @@ rack_df = None
 rack_error = None
 
 if rack_level_file is not None:
-    rf_name = rack_level_file.name.lower()
     try:
-        if rf_name.endswith((".xlsx", ".xls")):
-            rdf = pd.read_excel(rack_level_file)
-        else:
-            rdf = pd.read_csv(rack_level_file)
+        rdf = read_any_table(rack_level_file)
     except Exception as e:
         rack_error = f"❌ Error reading rack-level file: {e}"
     else:
         if rdf.empty:
             rack_error = "❌ Rack-level file has no rows of data."
         else:
-            rdf.columns = rdf.columns.str.strip()
+            rdf.columns = rdf.columns.astype(str).str.strip()
 
-            # Only these are mandatory now
-            required_rack_cols = [
-                "Time",
-                "BCMU ID",
-                "Total voltage",
-                "Current",
-            ]
-            missing_r = [c for c in required_rack_cols if c not in rdf.columns]
+            # Only mandatory
+            required_rack = ["Time", "BCMU ID", "Total voltage", "Current"]
+            missing_r = [c for c in required_rack if c not in rdf.columns]
             if missing_r:
                 rack_error = (
                     "❌ Rack-level file is missing required columns:\n"
@@ -433,69 +399,53 @@ if rack_level_file is not None:
                     + ", ".join(rdf.columns.astype(str))
                 )
             else:
-                # Time + sort
                 rdf["__time__"] = pd.to_datetime(rdf["Time"], errors="coerce")
-                rdf = rdf.dropna(subset=["__time__"])
-                rdf = rdf.sort_values("__time__")
+                rdf = rdf.dropna(subset=["__time__"]).sort_values("__time__")
 
-                # Scale mandatory columns according to units mode
-                if rack_eng_units:
-                    rdf["Total voltage"] = pd.to_numeric(rdf["Total voltage"], errors="coerce")
-                    rdf["Current"] = pd.to_numeric(rdf["Current"], errors="coerce")
-                else:
-                    rdf["Total voltage"] = pd.to_numeric(rdf["Total voltage"], errors="coerce") / 10.0
-                    rdf["Current"] = pd.to_numeric(rdf["Current"], errors="coerce") / 10.0
+                rdf["BCMU ID"] = clean_numeric_series(rdf["BCMU ID"])
+                rdf["Total voltage"] = clean_numeric_series(rdf["Total voltage"])
+                rdf["Current"] = clean_numeric_series(rdf["Current"])
 
-                # SOC handling:
+                if not rack_eng_units:
+                    rdf["Total voltage"] = rdf["Total voltage"] / 10.0
+                    rdf["Current"] = rdf["Current"] / 10.0
+
+                # Optional SOC columns
                 if "SOC" in rdf.columns:
-                    rdf["SOC"] = pd.to_numeric(rdf["SOC"], errors="coerce")
+                    rdf["SOC"] = clean_numeric_series(rdf["SOC"])
                 elif "SOC(0.1%)" in rdf.columns:
-                    if rack_eng_units:
-                        # Treat as already in %
-                        rdf["SOC"] = pd.to_numeric(rdf["SOC(0.1%)"], errors="coerce")
-                    else:
-                        # Raw 0.1% units
-                        rdf["SOC"] = pd.to_numeric(rdf["SOC(0.1%)"], errors="coerce") / 10.0
+                    rdf["SOC"] = clean_numeric_series(rdf["SOC(0.1%)"])
+                    if not rack_eng_units:
+                        rdf["SOC"] = rdf["SOC"] / 10.0
 
-                # Optional voltage-related columns: may be mV (raw) or V (engineering)
-                opt_mv_cols = [
-                    "Average voltage",
-                    "Highest cell voltage",
-                    "Lowest cell voltage",
-                    "Cell voltage difference",
-                ]
+                # Optional voltage columns (often mV)
+                opt_mv_cols = ["Average voltage", "Highest cell voltage", "Lowest cell voltage", "Cell voltage difference"]
                 for col in opt_mv_cols:
                     if col in rdf.columns:
-                        if rack_eng_units:
-                            rdf[col] = pd.to_numeric(rdf[col], errors="coerce")
-                        else:
-                            rdf[col] = pd.to_numeric(rdf[col], errors="coerce") / 1000.0
+                        rdf[col] = clean_numeric_series(rdf[col])
+                        if not rack_eng_units:
+                            rdf[col] = rdf[col] / 1000.0
 
-                # Optional position columns
-                if "Highest cell voltage position" in rdf.columns:
-                    rdf["Highest cell voltage position"] = pd.to_numeric(
-                        rdf["Highest cell voltage position"], errors="coerce"
-                    )
-                if "Lowest cell voltage position" in rdf.columns:
-                    rdf["Lowest cell voltage position"] = pd.to_numeric(
-                        rdf["Lowest cell voltage position"], errors="coerce"
-                    )
+                # Optional position cols
+                for col in ["Highest cell voltage position", "Lowest cell voltage position"]:
+                    if col in rdf.columns:
+                        rdf[col] = clean_numeric_series(rdf[col])
 
-                # Require at least valid Total voltage
-                rdf = rdf.dropna(subset=["Total voltage"])
-
+                rdf = rdf.dropna(subset=["BCMU ID", "Total voltage", "Current"])
                 if rdf.empty:
-                    rack_error = (
-                        "❌ After cleaning rack-level data, no valid rows remain with required values."
-                    )
+                    rack_error = "❌ After cleaning rack-level data, no valid rows remain."
                 else:
                     rack_df = rdf
 
-# =================================================================
-# MAIN SECTION: BMS OVERVIEW
-# =================================================================
-if main_page == "BMS Overview":
 
+# ============================================================
+# PAGES
+# ============================================================
+
+# =========================
+# BMS Overview + Energy
+# =========================
+if main_page == "BMS":
     if bms_subpage == "Overview":
         st.subheader("BMS Pack-Level Overview")
 
@@ -503,107 +453,79 @@ if main_page == "BMS Overview":
             st.info("Upload a **BMS log** in the sidebar to use this section.")
         elif bms_error is not None:
             st.error(bms_error)
-            if bms_df is not None:
-                st.dataframe(bms_df.head(50))
         elif bms_df is not None:
             df = bms_df
-            pack_v_col = "Stack voltage"
-            current_col = "Stack current"
-            soc_col = "SOC"
-            max_cell_v_col = "MAX CELL"
-            min_cell_v_col = "MIN CELL"
-            second_max_col = "2nd MAX CELL" if bms_has_2nd_max else None
-            second_min_col = "2nd MIN CELL" if bms_has_2nd_min else None
 
             st.markdown("### Key Metrics")
-            c1, c2, c3, c4 = st.columns(4)
-
-            with c1:
-                st.metric("Pack Voltage Max", f"{df[pack_v_col].max():.2f} V")
-                st.metric("Pack Voltage Min", f"{df[pack_v_col].min():.2f} V")
-
-            with c2:
-                st.metric("Min Cell Voltage (Abs Min)", f"{df[min_cell_v_col].min():.3f} V")
-                st.metric("Max Cell Voltage (Abs Max)", f"{df[max_cell_v_col].max():.3f} V")
-
-            with c3:
-                st.metric("Max Charge Current", f"{df[current_col].max():.1f} A")
-                st.metric("Max Discharge Current", f"{df[current_col].min():.1f} A")
-
-            with c4:
-                st.metric(
-                    "SoC Range",
-                    f"{df[soc_col].min():.1f} % → {df[soc_col].max():.1f} %",
-                )
+            m1, m2, m3, m4 = st.columns(4)
+            with m1:
+                st.metric("Pack Voltage Max", f"{df['Stack voltage'].max():.2f} V")
+                st.metric("Pack Voltage Min", f"{df['Stack voltage'].min():.2f} V")
+            with m2:
+                st.metric("Min Cell Voltage (Abs Min)", f"{df['MIN CELL'].min():.3f} V")
+                st.metric("Max Cell Voltage (Abs Max)", f"{df['MAX CELL'].max():.3f} V")
+            with m3:
+                st.metric("Max Charge Current", f"{df['Stack current'].max():.1f} A")
+                st.metric("Max Discharge Current", f"{df['Stack current'].min():.1f} A")
+            with m4:
+                st.metric("SoC Range", f"{df['SOC'].min():.1f}% → {df['SOC'].max():.1f}%")
 
             st.markdown("---")
             st.markdown("### Trends Over Time")
 
-            # Stack voltage
-            fig_pack = px.line(
-                df,
-                x="__time__",
-                y=pack_v_col,
-                title="Stack Voltage Over Time",
+            st.plotly_chart(
+                px.line(df, x="__time__", y="Stack voltage", title="Stack Voltage Over Time")
+                .update_layout(xaxis_title="Time", yaxis_title="Voltage (V)"),
+                use_container_width=True,
             )
-            fig_pack.update_layout(xaxis_title="Time", yaxis_title="Voltage (V)")
-            st.plotly_chart(fig_pack, use_container_width=True)
 
-            # Cell voltages
-            y_cols = [min_cell_v_col, max_cell_v_col]
-            legend_names = {
-                min_cell_v_col: "MIN CELL",
-                max_cell_v_col: "MAX CELL",
-            }
-            if second_min_col is not None:
-                y_cols.append(second_min_col)
-                legend_names[second_min_col] = "2nd MIN CELL"
-            if second_max_col is not None:
-                y_cols.append(second_max_col)
-                legend_names[second_max_col] = "2nd MAX CELL"
+            y_cols = ["MIN CELL", "MAX CELL"]
+            legend_names = {"MIN CELL": "MIN CELL", "MAX CELL": "MAX CELL"}
+            if bms_has_2nd_min:
+                y_cols.append("2nd MIN CELL")
+                legend_names["2nd MIN CELL"] = "2nd MIN CELL"
+            if bms_has_2nd_max:
+                y_cols.append("2nd MAX CELL")
+                legend_names["2nd MAX CELL"] = "2nd MAX CELL"
 
-            fig_cells = px.line(
-                df,
-                x="__time__",
-                y=y_cols,
-                title="Cell Voltages Over Time",
-            )
+            fig_cells = px.line(df, x="__time__", y=y_cols, title="Cell Voltages Over Time")
             fig_cells.update_layout(xaxis_title="Time", yaxis_title="Cell Voltage (V)")
             fig_cells.for_each_trace(lambda t: t.update(name=legend_names.get(t.name, t.name)))
             st.plotly_chart(fig_cells, use_container_width=True)
 
-            # Cell delta
-            fig_delta = px.line(
-                df,
-                x="__time__",
-                y="cell_delta",
-                title="Cell Voltage Delta (MAX - MIN)",
+            st.plotly_chart(
+                px.line(df, x="__time__", y="cell_delta", title="Cell Voltage Delta (MAX - MIN)")
+                .update_layout(xaxis_title="Time", yaxis_title="Delta (V)"),
+                use_container_width=True,
             )
-            fig_delta.update_layout(xaxis_title="Time", yaxis_title="Delta (V)")
-            st.plotly_chart(fig_delta, use_container_width=True)
 
-            # Current
-            fig_current = px.line(
-                df,
-                x="__time__",
-                y=current_col,
-                title="Stack Current Over Time",
+            st.plotly_chart(
+                px.line(df, x="__time__", y="Stack current", title="Stack Current Over Time")
+                .update_layout(xaxis_title="Time", yaxis_title="Current (A)"),
+                use_container_width=True,
             )
-            fig_current.update_layout(xaxis_title="Time", yaxis_title="Current (A)")
-            st.plotly_chart(fig_current, use_container_width=True)
 
-            # SoC
-            fig_soc = px.line(
-                df,
-                x="__time__",
-                y=soc_col,
-                title="State of Charge (SoC) Over Time",
+            st.plotly_chart(
+                px.line(df, x="__time__", y="SOC", title="State of Charge (SoC) Over Time")
+                .update_layout(xaxis_title="Time", yaxis_title="SoC (%)"),
+                use_container_width=True,
             )
-            fig_soc.update_layout(xaxis_title="Time", yaxis_title="SoC (%)")
-            st.plotly_chart(fig_soc, use_container_width=True)
+
+            with st.expander("🧪 BMS parsing diagnostics", expanded=False):
+                st.write("Engineering-units mode:", bool(bms_eng_units))
+                st.write("First 10 rows after parse/scaling:")
+                st.dataframe(df[["Time", "__time__", "Stack voltage", "Stack current", "SOC", "MAX CELL", "MIN CELL"]].head(10))
+                st.write(
+                    {
+                        "valid_time_%": float(df["__time__"].notna().mean() * 100.0),
+                        "valid_stackV_%": float(df["Stack voltage"].notna().mean() * 100.0),
+                        "valid_maxcell_%": float(df["MAX CELL"].notna().mean() * 100.0),
+                        "valid_mincell_%": float(df["MIN CELL"].notna().mean() * 100.0),
+                    }
+                )
 
     elif bms_subpage == "Energy":
-        st.subheader("BMS Energy")
+        st.subheader("BMS Energy (from BMS log)")
 
         if bms_df is None:
             if bms_error:
@@ -611,263 +533,68 @@ if main_page == "BMS Overview":
             else:
                 st.info("Upload a **BMS log** in the sidebar to compute energy.")
         else:
-            df = bms_df
-            pack_v_col = "Stack voltage"
-            current_col = "Stack current"
-
-            t_min = df["__time__"].min()
-            t_max = df["__time__"].max()
+            df = bms_df.copy()
+            t_min, t_max = df["__time__"].min(), df["__time__"].max()
 
             start_t, end_t = st.select_slider(
                 "Select time range",
                 options=list(df["__time__"]),
                 value=(t_min, t_max),
+                key="bms_energy_slider",
             )
 
             if start_t >= end_t:
                 st.warning("Start time must be before end time.")
             else:
                 df_energy = df[(df["__time__"] >= start_t) & (df["__time__"] <= end_t)].copy()
-
                 if len(df_energy) < 2:
                     st.warning("Not enough points in this time range to compute energy.")
                 else:
+                    df_energy = df_energy.sort_values("__time__")
                     df_energy["dt_h"] = df_energy["__time__"].shift(-1) - df_energy["__time__"]
                     df_energy["dt_h"] = df_energy["dt_h"].dt.total_seconds().fillna(0) / 3600.0
-
-                    df_energy["power_kW"] = df_energy[pack_v_col] * df_energy[current_col] / 1000.0
+                    df_energy["power_kW"] = df_energy["Stack voltage"] * df_energy["Stack current"] / 1000.0
                     df_energy["dE_kWh"] = df_energy["power_kW"] * df_energy["dt_h"]
 
                     energy_out_kWh = df_energy.loc[df_energy["power_kW"] > 0, "dE_kWh"].sum()
                     energy_in_kWh = -df_energy.loc[df_energy["power_kW"] < 0, "dE_kWh"].sum()
                     net_energy_kWh = energy_out_kWh - energy_in_kWh
 
-                    c1, c2, c3 = st.columns(3)
-                    c1.metric("Energy OUT (Discharge)", f"{energy_out_kWh:.2f} kWh")
-                    c2.metric("Energy IN (Charge)", f"{energy_in_kWh:.2f} kWh")
-                    c3.metric("Net Energy (OUT - IN)", f"{net_energy_kWh:.2f} kWh")
+                    a, b, c = st.columns(3)
+                    a.metric("Energy OUT (Discharge)", f"{energy_out_kWh:.2f} kWh")
+                    b.metric("Energy IN (Charge)", f"{energy_in_kWh:.2f} kWh")
+                    c.metric("Net Energy (OUT - IN)", f"{net_energy_kWh:.2f} kWh")
 
-                    st.caption(
-                        f"Time window: {start_t.strftime('%Y-%m-%d %H:%M:%S')} → "
-                        f"{end_t.strftime('%Y-%m-%d %H:%M:%S')} "
-                        f"({(end_t - start_t).total_seconds()/3600.0:.2f} hours)"
+                    st.plotly_chart(
+                        px.line(df_energy, x="__time__", y="power_kW", title="Power (kW) in Selected Range")
+                        .update_layout(xaxis_title="Time", yaxis_title="Power (kW)"),
+                        use_container_width=True,
                     )
-
-                    fig_pwr = px.line(
-                        df_energy,
-                        x="__time__",
-                        y="power_kW",
-                        title="Power (kW) in Selected Range",
-                    )
-                    fig_pwr.update_layout(xaxis_title="Time", yaxis_title="Power (kW)")
-                    st.plotly_chart(fig_pwr, use_container_width=True)
 
                     with st.expander("Show calculation table (first 200 rows)"):
                         st.dataframe(
                             df_energy[
-                                ["__time__", pack_v_col, current_col, "power_kW", "dt_h", "dE_kWh"]
-                            ].rename(
+                                ["__time__", "Stack voltage", "Stack current", "power_kW", "dt_h", "dE_kWh"]
+                            ]
+                            .rename(
                                 columns={
                                     "__time__": "Time",
-                                    pack_v_col: "Stack Voltage (V)",
-                                    current_col: "Stack Current (A)",
+                                    "Stack voltage": "Stack Voltage (V)",
+                                    "Stack current": "Stack Current (A)",
                                     "power_kW": "Power (kW)",
                                     "dt_h": "Δt (h)",
                                     "dE_kWh": "ΔE (kWh)",
                                 }
-                            ).head(200)
-                        )
-
-                    # -------------------------------------------------
-                    # Theoretical container energy from LFP cell specs
-                    # -------------------------------------------------
-                    st.markdown("---")
-                    st.subheader("Theoretical Container Energy (LFP OCV Model)")
-
-                    # ---- User inputs ----
-                    cell_Ah = st.number_input(
-                        "Cell capacity (Ah)",
-                        min_value=0.1,
-                        max_value=2000.0,
-                        value=280.0,
-                        step=10.0,
-                        help="Nameplate Ah rating of one LFP cell",
-                        key="energy_cell_Ah",
-                    )
-
-                    cells_per_string = st.number_input(
-                        "Cells in series per string",
-                        min_value=1,
-                        max_value=2000,
-                        value=396,
-                        step=1,
-                        help="For example: 396 cells in series in one rack/string",
-                        key="energy_cells_per_string",
-                    )
-
-                    num_strings = st.number_input(
-                        "Number of parallel strings / racks",
-                        min_value=1,
-                        max_value=100,
-                        value=4,
-                        step=1,
-                        help="For example: number of racks tied in parallel on the DC bus",
-                        key="energy_num_strings",
-                    )
-
-                    charge_cutoff = st.number_input(
-                        "Charge cutoff voltage per cell (V)",
-                        min_value=0.0,
-                        max_value=10.0,
-                        value=3.6,
-                        step=0.01,
-                        key="energy_charge_cutoff",
-                    )
-
-                    discharge_cutoff = st.number_input(
-                        "Discharge cutoff voltage per cell (V)",
-                        min_value=0.0,
-                        max_value=10.0,
-                        value=2.7,
-                        step=0.01,
-                        key="energy_discharge_cutoff",
-                    )
-
-                    weak_cells = st.number_input(
-                        "Number of weak cells to bypass/remove",
-                        min_value=0,
-                        max_value=1000,
-                        value=1,
-                        step=1,
-                        help="If one or more cells are effectively unusable and must be removed from the energy budget.",
-                        key="energy_weak_cells",
-                    )
-
-                    # ---- Approximate LFP OCV curve (SoC in [0,1]) ----
-                    lfp_curve = [
-                        (0.00, 2.50),
-                        (0.05, 3.00),
-                        (0.10, 3.20),
-                        (0.20, 3.25),
-                        (0.80, 3.28),
-                        (0.90, 3.30),
-                        (0.95, 3.35),
-                        (1.00, 3.60),
-                    ]
-
-                    def ocv_lfp(soc: float) -> float:
-                        """Piecewise-linear OCV(soc) for LFP."""
-                        if soc <= 0.0:
-                            return lfp_curve[0][1]
-                        if soc >= 1.0:
-                            return lfp_curve[-1][1]
-                        for (s1, v1), (s2, v2) in zip(lfp_curve, lfp_curve[1:]):
-                            if s1 <= soc <= s2:
-                                t = (soc - s1) / (s2 - s1)
-                                return v1 + t * (v2 - v1)
-                        return lfp_curve[-1][1]
-
-                    def find_soc_for_voltage(v_target: float, steps: int = 2000):
-                        """
-                        Find SOC in [0,1] where OCV(SOC) ≈ v_target by scanning and interpolating.
-                        Returns None if not found.
-                        """
-                        s_prev = 0.0
-                        v_prev = ocv_lfp(s_prev)
-                        for i in range(1, steps + 1):
-                            s = i / steps
-                            v = ocv_lfp(s)
-                            if (v_prev - v_target) * (v - v_target) <= 0:
-                                if v == v_prev:
-                                    return s
-                                t = (v_target - v_prev) / (v - v_prev)
-                                s_cross = s_prev + t * (s - s_prev)
-                                return max(0.0, min(1.0, s_cross))
-                            s_prev, v_prev = s, v
-                        return None
-
-                    def integrate_ocv(soc_min: float, soc_max: float, steps: int = 1000) -> float:
-                        """
-                        Numerically integrate OCV(soc) d(soc) from soc_min to soc_max
-                        using midpoint rule. Returns ∫ V dSOC (unit: V * fraction_of_SOC).
-                        """
-                        if soc_max <= soc_min:
-                            return 0.0
-                        ds = (soc_max - soc_min) / steps
-                        total = 0.0
-                        for i in range(steps):
-                            s_mid = soc_min + (i + 0.5) * ds
-                            total += ocv_lfp(s_mid)
-                        return total * ds
-
-                    if charge_cutoff <= discharge_cutoff:
-                        st.warning("Charge cutoff must be higher than discharge cutoff.")
-                    elif cell_Ah <= 0 or cells_per_string <= 0 or num_strings <= 0:
-                        st.warning("Please enter positive values for cell Ah, cell count, and number of strings.")
-                    else:
-                        soc_min = find_soc_for_voltage(discharge_cutoff)
-                        soc_max = find_soc_for_voltage(charge_cutoff)
-
-                        if soc_min is None:
-                            soc_min = 0.0
-                        if soc_max is None:
-                            soc_max = 1.0
-
-                        if soc_max <= soc_min:
-                            st.warning(
-                                "Could not determine a valid SOC window from the specified cutoffs "
-                                "using the LFP OCV curve. Using full 0–100% SOC as fallback."
                             )
-                            soc_min, soc_max = 0.0, 1.0
-
-                        usable_soc_pct = (soc_max - soc_min) * 100.0
-                        integral_VdSOC = integrate_ocv(soc_min, soc_max, steps=1000)
-                        avg_voltage = integral_VdSOC / (soc_max - soc_min) if soc_max > soc_min else 0.0
-
-                        # per-cell usable energy in Wh
-                        energy_cell_Wh = cell_Ah * integral_VdSOC
-
-                        total_cells = cells_per_string * num_strings
-                        effective_cells = max(total_cells - weak_cells, 0)
-
-                        full_energy_kWh = energy_cell_Wh * total_cells / 1000.0
-                        weak_energy_kWh = energy_cell_Wh * effective_cells / 1000.0
-
-                        shortfall_kWh = full_energy_kWh - weak_energy_kWh
-                        shortfall_pct = (shortfall_kWh / full_energy_kWh * 100.0) if full_energy_kWh > 0 else 0.0
-
-                        st.markdown(
-                            f"Estimated usable SOC window from LFP OCV curve: **{usable_soc_pct:.1f}%** "
-                            f"({soc_min*100:.1f}% → {soc_max*100:.1f}%).  "
-                            f"Average cell voltage over this window ≈ **{avg_voltage:.3f} V**."
+                            .head(200)
                         )
 
-                        cE1, cE2, cE3 = st.columns(3)
-                        cE1.metric(
-                            "Full theoretical energy (all cells healthy)",
-                            f"{full_energy_kWh:.1f} kWh",
-                        )
-                        cE2.metric(
-                            "Energy if weak cell(s) removed",
-                            f"{weak_energy_kWh:.1f} kWh",
-                        )
-                        cE3.metric(
-                            "Shortfall vs full design",
-                            f"{shortfall_kWh:.1f} kWh ({shortfall_pct:.2f} %)",
-                        )
 
-                        st.caption(
-                            "Based on an approximate **LFP OCV–SoC curve**, integrated between the SOC levels "
-                            "corresponding to your per-cell voltage cutoffs. "
-                            "This is still an approximation (real cells differ with temperature, rate, ageing), "
-                            "but it is more realistic than a simple linear voltage model."
-                        )
-
-# =================================================================
-# MAIN SECTION: RACK LEVEL
-# =================================================================
-elif main_page == "Rack Level":
-    st.subheader("Rack-Level Analysis")
+# =========================
+# Rack Level + Rack Energy
+# =========================
+elif main_page == "RACK":
+    st.subheader("Rack-Level Analysis (BCMU separated)")
 
     if rack_level_file is None and rack_df is None:
         if rack_error:
@@ -878,161 +605,82 @@ elif main_page == "Rack Level":
         st.error(rack_error)
     elif rack_df is not None:
         df_all = rack_df.copy()
-
         bcmu_ids = sorted(df_all["BCMU ID"].dropna().unique())
-        if len(bcmu_ids) == 0:
-            st.info("No valid `BCMU ID` values found in rack-level file.")
-        else:
-            st.caption(
-                f"Found **{len(bcmu_ids)}** BCMU IDs in this file: "
-                + ", ".join(str(int(x)) for x in bcmu_ids)
-            )
 
-        # -----------------------------
-        # RACK LEVEL → OVERVIEW SUBPAGE
-        # -----------------------------
+        if len(bcmu_ids) == 0:
+            st.info("No valid `BCMU ID` values found.")
+        else:
+            st.caption("BCMU IDs found: " + ", ".join(str(int(x)) for x in bcmu_ids))
+
         if rack_subpage == "Overview":
-            for idx, bcmu in enumerate(bcmu_ids):
+            for i, bcmu in enumerate(bcmu_ids):
                 df = df_all[df_all["BCMU ID"] == bcmu].copy()
                 if df.empty:
                     continue
-
-                if idx > 0:
+                if i > 0:
                     st.markdown("---")
 
-                st.markdown(f"### BCMU ID {int(bcmu)} — Overview")
+                st.markdown(f"### BCMU ID {int(bcmu)}")
 
                 c1, c2, c3, c4 = st.columns(4)
-
-                # Always available
                 with c1:
-                    st.metric("Rack Voltage Max", f"{df['Total voltage'].max():.2f} V")
-                    st.metric("Rack Voltage Min", f"{df['Total voltage'].min():.2f} V")
-
-                # Average voltage metrics (optional)
+                    st.metric("Total Voltage Max", f"{df['Total voltage'].max():.2f} V")
+                    st.metric("Total Voltage Min", f"{df['Total voltage'].min():.2f} V")
                 with c2:
-                    if "Average voltage" in df.columns:
-                        avg_max = df["Average voltage"].max()
-                        avg_min = df["Average voltage"].min()
-                        st.metric("Avg Cell Voltage Max", f"{avg_max:.3f} V")
-                        st.metric("Avg Cell Voltage Min", f"{avg_min:.3f} V")
-                    else:
-                        st.metric("Avg Cell Voltage Max", "N/A")
-                        st.metric("Avg Cell Voltage Min", "N/A")
-
-                # Delta metrics (optional)
+                    st.metric("Current Max", f"{df['Current'].max():.2f} A")
+                    st.metric("Current Min", f"{df['Current'].min():.2f} A")
                 with c3:
-                    if "Cell voltage difference" in df.columns:
-                        dmax = df["Cell voltage difference"].max()
-                        dmin = df["Cell voltage difference"].min()
-                        st.metric("Max ΔCell V", f"{dmax:.3f} V")
-                        st.metric("Min ΔCell V", f"{dmin:.3f} V")
-                    else:
-                        st.metric("Max ΔCell V", "N/A")
-                        st.metric("Min ΔCell V", "N/A")
-
-                # SOC range (optional)
-                with c4:
                     if "SOC" in df.columns:
-                        soc_min = df["SOC"].min()
-                        soc_max = df["SOC"].max()
-                        st.metric(
-                            "SOC Range",
-                            f"{soc_min:.1f} % → {soc_max:.1f} %",
-                        )
+                        st.metric("SOC Range", f"{df['SOC'].min():.1f}% → {df['SOC'].max():.1f}%")
                     else:
                         st.metric("SOC Range", "N/A")
+                with c4:
+                    if "Cell voltage difference" in df.columns:
+                        st.metric("ΔCellV Max", f"{df['Cell voltage difference'].max():.3f} V")
+                        st.metric("ΔCellV Min", f"{df['Cell voltage difference'].min():.3f} V")
+                    else:
+                        st.metric("ΔCellV Max", "N/A")
+                        st.metric("ΔCellV Min", "N/A")
 
-                st.markdown("**Rack Voltage and Average Cell Voltage**")
-
-                fig_rack_v = px.line(
-                    df,
-                    x="__time__",
-                    y="Total voltage",
-                    title=f"Rack Total Voltage Over Time (BCMU {int(bcmu)})",
+                st.plotly_chart(
+                    px.line(df, x="__time__", y="Total voltage", title=f"Total Voltage (BCMU {int(bcmu)})")
+                    .update_layout(xaxis_title="Time", yaxis_title="Voltage (V)"),
+                    use_container_width=True,
                 )
-                fig_rack_v.update_layout(xaxis_title="Time", yaxis_title="Voltage (V)")
-                st.plotly_chart(fig_rack_v, use_container_width=True)
+
+                st.plotly_chart(
+                    px.line(df, x="__time__", y="Current", title=f"Current (BCMU {int(bcmu)})")
+                    .update_layout(xaxis_title="Time", yaxis_title="Current (A)"),
+                    use_container_width=True,
+                )
 
                 if "Average voltage" in df.columns:
-                    fig_avg = px.line(
-                        df,
-                        x="__time__",
-                        y="Average voltage",
-                        title=f"Average Cell Voltage Over Time (BCMU {int(bcmu)})",
+                    st.plotly_chart(
+                        px.line(df, x="__time__", y="Average voltage", title=f"Average Cell Voltage (BCMU {int(bcmu)})")
+                        .update_layout(xaxis_title="Time", yaxis_title="Voltage (V)"),
+                        use_container_width=True,
                     )
-                    fig_avg.update_layout(xaxis_title="Time", yaxis_title="Average Cell Voltage (V)")
-                    st.plotly_chart(fig_avg, use_container_width=True)
 
                 if "Highest cell voltage" in df.columns and "Lowest cell voltage" in df.columns:
-                    st.markdown("**Highest / Lowest Cell Voltage Over Time**")
-
-                    fig_hi_lo = px.line(
-                        df,
-                        x="__time__",
-                        y=["Highest cell voltage", "Lowest cell voltage"],
-                        title=f"Highest and Lowest Cell Voltages Over Time (BCMU {int(bcmu)})",
+                    st.plotly_chart(
+                        px.line(
+                            df,
+                            x="__time__",
+                            y=["Highest cell voltage", "Lowest cell voltage"],
+                            title=f"Highest/Lowest Cell Voltage (BCMU {int(bcmu)})",
+                        ).update_layout(xaxis_title="Time", yaxis_title="Cell Voltage (V)", legend_title="Series"),
+                        use_container_width=True,
                     )
-                    fig_hi_lo.update_layout(
-                        xaxis_title="Time",
-                        yaxis_title="Cell Voltage (V)",
-                        legend_title="Series",
-                    )
-                    st.plotly_chart(fig_hi_lo, use_container_width=True)
 
                 if "Cell voltage difference" in df.columns:
-                    st.markdown("**Cell Voltage Difference (Imbalance)**")
-
-                    fig_diff = px.line(
-                        df,
-                        x="__time__",
-                        y="Cell voltage difference",
-                        title=f"Cell Voltage Difference Over Time (BCMU {int(bcmu)})",
+                    st.plotly_chart(
+                        px.line(df, x="__time__", y="Cell voltage difference", title=f"Cell Voltage Difference (BCMU {int(bcmu)})")
+                        .update_layout(xaxis_title="Time", yaxis_title="Delta (V)"),
+                        use_container_width=True,
                     )
-                    fig_diff.update_layout(
-                        xaxis_title="Time",
-                        yaxis_title="Voltage Difference (V)",
-                    )
-                    st.plotly_chart(fig_diff, use_container_width=True)
 
-                    st.markdown("**Extreme Cell Positions (This BCMU)**")
-
-                    idx_max_diff = df["Cell voltage difference"].idxmax()
-                    idx_min_diff = df["Cell voltage difference"].idxmin()
-
-                    if pd.notna(idx_max_diff):
-                        row_max = df.loc[idx_max_diff]
-                        msg = (
-                            f"- Max ΔCell V: **{row_max['Cell voltage difference']:.3f} V** at "
-                            f"{row_max['__time__']}"
-                        )
-                        if "Highest cell voltage position" in df.columns and "Lowest cell voltage position" in df.columns:
-                            msg += (
-                                f" (Highest cell #{int(row_max['Highest cell voltage position'])}, "
-                                f"Lowest cell #{int(row_max['Lowest cell voltage position'])})."
-                            )
-                        st.write(msg)
-
-                    if pd.notna(idx_min_diff):
-                        row_min = df.loc[idx_min_diff]
-                        msg = (
-                            f"- Min ΔCell V: **{row_min['Cell voltage difference']:.3f} V** at "
-                            f"{row_min['__time__']}"
-                        )
-                        if "Highest cell voltage position" in df.columns and "Lowest cell voltage position" in df.columns:
-                            msg += (
-                                f" (Highest cell #{int(row_min['Highest cell voltage position'])}, "
-                                f"Lowest cell #{int(row_min['Lowest cell voltage position'])})."
-                            )
-                        st.write(msg)
-
-                with st.expander(f"Show rack-level data for BCMU {int(bcmu)} (first 200 rows)"):
-                    base_cols = [
-                        "__time__",
-                        "BCMU ID",
-                        "Total voltage",
-                        "Current",
-                    ]
+                with st.expander(f"Show data table (BCMU {int(bcmu)}) - first 200 rows"):
+                    base_cols = ["__time__", "BCMU ID", "Total voltage", "Current"]
                     opt_cols = [
                         "SOC",
                         "Average voltage",
@@ -1042,24 +690,17 @@ elif main_page == "Rack Level":
                         "Lowest cell voltage position",
                         "Cell voltage difference",
                     ]
-                    view_cols = base_cols + [c for c in opt_cols if c in df.columns]
-                    df_view = df[view_cols].rename(columns={"__time__": "Time"})
-                    if "SOC" in df_view.columns:
-                        df_view = df_view.rename(columns={"SOC": "SOC (%)"})
-                    st.dataframe(df_view.head(200))
+                    cols = base_cols + [c for c in opt_cols if c in df.columns]
+                    view = df[cols].rename(columns={"__time__": "Time"})
+                    st.dataframe(view.head(200))
 
-        # -----------------------------
-        # RACK LEVEL → ENERGY SUBPAGE
-        # -----------------------------
         elif rack_subpage == "Energy":
             st.markdown("### Rack Energy (Per BCMU)")
 
             if len(bcmu_ids) == 0:
                 st.info("No BCMU IDs available for energy analysis.")
             else:
-                # Add "All BCMU" option
                 bcmu_choice_list = ["All BCMU"] + list(bcmu_ids)
-
                 selected_bcmu = st.selectbox(
                     "Select BCMU ID for energy analysis",
                     bcmu_choice_list,
@@ -1067,7 +708,6 @@ elif main_page == "Rack Level":
                     key="rack_energy_bcmu_select",
                 )
 
-                # Decide which dataframe we work on
                 if selected_bcmu == "All BCMU":
                     df = df_all.copy()
                     label_str = "all BCMU"
@@ -1075,94 +715,54 @@ elif main_page == "Rack Level":
                     df = df_all[df_all["BCMU ID"] == selected_bcmu].copy()
                     label_str = f"BCMU {int(selected_bcmu)}"
 
-                if df.empty:
-                    st.warning(f"No data for {label_str}.")
-                elif df["__time__"].nunique() < 2:
-                    st.info("Not enough time points to compute energy for this selection.")
+                if df.empty or df["__time__"].nunique() < 2:
+                    st.warning(f"Not enough data points for {label_str}.")
                 else:
-                    # Time range slider based on selected subset
-                    t_min = df["__time__"].min()
-                    t_max = df["__time__"].max()
-
+                    t_min, t_max = df["__time__"].min(), df["__time__"].max()
                     start_t, end_t = st.select_slider(
                         f"Select time range for {label_str}",
                         options=list(df["__time__"]),
                         value=(t_min, t_max),
-                        key=f"rack_energy_slider_{str(label_str)}",
+                        key=f"rack_energy_slider_{label_str}",
                     )
 
                     if start_t >= end_t:
                         st.warning("Start time must be before end time.")
                     else:
-                        # Apply selected time window
-                        df_energy = df[
-                            (df["__time__"] >= start_t) & (df["__time__"] <= end_t)
-                        ].copy()
+                        df_window = df[(df["__time__"] >= start_t) & (df["__time__"] <= end_t)].copy()
 
-                        if len(df_energy) < 2:
-                            st.warning("Not enough points in this time range to compute energy.")
-                        else:
-                            # Basic power/energy calculation
-                            df_energy["dt_h"] = (
-                                df_energy["__time__"].shift(-1) - df_energy["__time__"]
-                            )
-                            df_energy["dt_h"] = (
-                                df_energy["dt_h"].dt.total_seconds().fillna(0) / 3600.0
-                            )
+                        # SINGLE BCMU
+                        if selected_bcmu != "All BCMU":
+                            df_b = df_window.sort_values("__time__").copy()
+                            if df_b["__time__"].nunique() < 2:
+                                st.info("Not enough points in this time window.")
+                            else:
+                                df_b["dt_h"] = df_b["__time__"].shift(-1) - df_b["__time__"]
+                                df_b["dt_h"] = df_b["dt_h"].dt.total_seconds().fillna(0) / 3600.0
+                                df_b["power_kW"] = df_b["Total voltage"] * df_b["Current"] / 1000.0
+                                df_b["dE_kWh"] = df_b["power_kW"] * df_b["dt_h"]
 
-                            df_energy["power_kW"] = (
-                                df_energy["Total voltage"] * df_energy["Current"] / 1000.0
-                            )
-                            df_energy["dE_kWh"] = df_energy["power_kW"] * df_energy["dt_h"]
+                                e_out = df_b.loc[df_b["power_kW"] > 0, "dE_kWh"].sum()
+                                e_in = -df_b.loc[df_b["power_kW"] < 0, "dE_kWh"].sum()
+                                e_net = e_out - e_in
 
-                            # CASE 1: Single BCMU – same behavior as before
-                            if selected_bcmu != "All BCMU":
-                                energy_out_kWh = df_energy.loc[
-                                    df_energy["power_kW"] > 0, "dE_kWh"
-                                ].sum()
-                                energy_in_kWh = -df_energy.loc[
-                                    df_energy["power_kW"] < 0, "dE_kWh"
-                                ].sum()
-                                net_energy_kWh = energy_out_kWh - energy_in_kWh
+                                a, b, c = st.columns(3)
+                                a.metric("Energy OUT (Discharge)", f"{e_out:.2f} kWh")
+                                b.metric("Energy IN (Charge)", f"{e_in:.2f} kWh")
+                                c.metric("Net Energy (OUT - IN)", f"{e_net:.2f} kWh")
 
-                                e1, e2, e3 = st.columns(3)
-                                e1.metric("Energy OUT (Discharge)", f"{energy_out_kWh:.2f} kWh")
-                                e2.metric("Energy IN (Charge)", f"{energy_in_kWh:.2f} kWh")
-                                e3.metric("Net Energy (OUT - IN)", f"{net_energy_kWh:.2f} kWh")
-
-                                st.caption(
-                                    f"{label_str} time window: "
-                                    f"{start_t.strftime('%Y-%m-%d %H:%M:%S')} → "
-                                    f"{end_t.strftime('%Y-%m-%d %H:%M:%S')} "
-                                    f"({(end_t - start_t).total_seconds()/3600.0:.2f} hours)"
+                                st.plotly_chart(
+                                    px.line(df_b, x="__time__", y="power_kW", title=f"Rack Power (kW) for {label_str}")
+                                    .update_layout(xaxis_title="Time", yaxis_title="Power (kW)"),
+                                    use_container_width=True,
                                 )
 
-                                fig_pwr_rack = px.line(
-                                    df_energy,
-                                    x="__time__",
-                                    y="power_kW",
-                                    title=f"Rack Power (kW) for {label_str}",
-                                )
-                                fig_pwr_rack.update_layout(
-                                    xaxis_title="Time",
-                                    yaxis_title="Power (kW)",
-                                )
-                                st.plotly_chart(fig_pwr_rack, use_container_width=True)
-
-                                with st.expander(
-                                    f"Show energy calculation table for {label_str} (first 200 rows)"
-                                ):
+                                with st.expander("Show energy calculation table (first 200 rows)"):
                                     st.dataframe(
-                                        df_energy[
-                                            [
-                                                "__time__",
-                                                "Total voltage",
-                                                "Current",
-                                                "power_kW",
-                                                "dt_h",
-                                                "dE_kWh",
-                                            ]
-                                        ].rename(
+                                        df_b[
+                                            ["__time__", "Total voltage", "Current", "power_kW", "dt_h", "dE_kWh"]
+                                        ]
+                                        .rename(
                                             columns={
                                                 "__time__": "Time",
                                                 "Total voltage": "Rack Voltage (V)",
@@ -1171,137 +771,103 @@ elif main_page == "Rack Level":
                                                 "dt_h": "Δt (h)",
                                                 "dE_kWh": "ΔE (kWh)",
                                             }
-                                        ).head(200)
+                                        )
+                                        .head(200)
                                     )
 
-                                                      # CASE 2: All BCMU – overlay all racks & show per-BCMU table
+                        # ALL BCMU (FIXED: compute dt per BCMU)
+                        else:
+                            summary_rows = []
+                            per_bcmu_frames = []
+
+                            for bcmu in bcmu_ids:
+                                df_b = df_window[df_window["BCMU ID"] == bcmu].copy()
+                                if df_b.empty or df_b["__time__"].nunique() < 2:
+                                    continue
+
+                                df_b = df_b.sort_values("__time__")
+                                df_b["dt_h"] = df_b["__time__"].shift(-1) - df_b["__time__"]
+                                df_b["dt_h"] = df_b["dt_h"].dt.total_seconds().fillna(0) / 3600.0
+                                df_b["power_kW"] = df_b["Total voltage"] * df_b["Current"] / 1000.0
+                                df_b["dE_kWh"] = df_b["power_kW"] * df_b["dt_h"]
+
+                                e_out = df_b.loc[df_b["power_kW"] > 0, "dE_kWh"].sum()
+                                e_in = -df_b.loc[df_b["power_kW"] < 0, "dE_kWh"].sum()
+                                e_net = e_out - e_in
+
+                                summary_rows.append(
+                                    {
+                                        "BCMU ID": int(bcmu),
+                                        "Energy OUT (kWh)": e_out,
+                                        "Energy IN (kWh)": e_in,
+                                        "Net Energy (kWh)": e_net,
+                                    }
+                                )
+                                per_bcmu_frames.append(df_b)
+
+                            if not summary_rows:
+                                st.info("No BCMU has enough valid data points in this window to compute energy.")
                             else:
-                                # We must compute dt_h and dE_kWh PER BCMU,
-                                # not on the merged df_energy.
-                                summary_rows = []
-                                per_bcmu_energy_frames = []
-
-                                for bcmu in bcmu_ids:
-                                    df_b = df_energy[df_energy["BCMU ID"] == bcmu].copy()
-                                    if df_b.empty or df_b["__time__"].nunique() < 2:
-                                        continue
-
-                                    # Ensure sorted by time
-                                    df_b = df_b.sort_values("__time__")
-
-                                    # Recompute Δt and energy for this BCMU only
-                                    df_b["dt_h"] = df_b["__time__"].shift(-1) - df_b["__time__"]
-                                    df_b["dt_h"] = (
-                                        df_b["dt_h"].dt.total_seconds().fillna(0) / 3600.0
-                                    )
-
-                                    df_b["power_kW"] = (
-                                        df_b["Total voltage"] * df_b["Current"] / 1000.0
-                                    )
-                                    df_b["dE_kWh"] = df_b["power_kW"] * df_b["dt_h"]
-
-                                    # Per-BCMU energy summary
-                                    e_out = df_b.loc[df_b["power_kW"] > 0, "dE_kWh"].sum()
-                                    e_in = -df_b.loc[df_b["power_kW"] < 0, "dE_kWh"].sum()
-                                    e_net = e_out - e_in
-
-                                    summary_rows.append(
+                                st.markdown("#### Energy Summary per BCMU in Selected Window")
+                                df_summary = pd.DataFrame(summary_rows).sort_values("BCMU ID")
+                                st.dataframe(
+                                    df_summary.style.format(
                                         {
-                                            "BCMU ID": int(bcmu),
-                                            "Energy OUT (kWh)": e_out,
-                                            "Energy IN (kWh)": e_in,
-                                            "Net Energy (kWh)": e_net,
+                                            "Energy OUT (kWh)": "{:.2f}",
+                                            "Energy IN (kWh)": "{:.2f}",
+                                            "Net Energy (kWh)": "{:.2f}",
                                         }
                                     )
-
-                                    per_bcmu_energy_frames.append(df_b)
-
-                                if summary_rows:
-                                    st.markdown("#### Energy Summary per BCMU in Selected Window")
-                                    df_summary = pd.DataFrame(summary_rows)
-                                    st.dataframe(
-                                        df_summary.style.format(
-                                            {
-                                                "Energy OUT (kWh)": "{:.2f}",
-                                                "Energy IN (kWh)": "{:.2f}",
-                                                "Net Energy (kWh)": "{:.2f}",
-                                            }
-                                        )
-                                    )
-                                else:
-                                    st.info(
-                                        "No BCMU has enough valid data points in the selected window "
-                                        "to compute energy."
-                                    )
-
-                                st.caption(
-                                    f"Time window (all BCMU): "
-                                    f"{start_t.strftime('%Y-%m-%d %H:%M:%S')} → "
-                                    f"{end_t.strftime('%Y-%m-%d %H:%M:%S')} "
-                                    f"({(end_t - start_t).total_seconds()/3600.0:.2f} hours)"
                                 )
 
-                                # Combine per-BCMU frames for plotting & table
-                                if per_bcmu_energy_frames:
-                                    df_all_energy = pd.concat(per_bcmu_energy_frames, ignore_index=True)
+                                df_all_energy = pd.concat(per_bcmu_frames, ignore_index=True)
 
-                                    fig_all = px.line(
+                                st.plotly_chart(
+                                    px.line(
                                         df_all_energy,
                                         x="__time__",
                                         y="power_kW",
                                         color="BCMU ID",
                                         title="Rack Power (kW) for All BCMU",
-                                    )
-                                    fig_all.update_layout(
+                                    ).update_layout(
                                         xaxis_title="Time",
                                         yaxis_title="Power (kW)",
                                         legend_title="BCMU ID",
-                                    )
-                                    st.plotly_chart(fig_all, use_container_width=True)
+                                    ),
+                                    use_container_width=True,
+                                )
 
-                                    with st.expander(
-                                        "Show combined energy calculation table (first 300000 rows)"
-                                    ):
-                                        st.dataframe(
-                                            df_all_energy[
-                                                [
-                                                    "__time__",
-                                                    "BCMU ID",
-                                                    "Total voltage",
-                                                    "Current",
-                                                    "power_kW",
-                                                    "dt_h",
-                                                    "dE_kWh",
-                                                ]
-                                            ].rename(
-                                                columns={
-                                                    "__time__": "Time",
-                                                    "Total voltage": "Rack Voltage (V)",
-                                                    "Current": "Rack Current (A)",
-                                                    "power_kW": "Power (kW)",
-                                                    "dt_h": "Δt (h)",
-                                                    "dE_kWh": "ΔE (kWh)",
-                                                }
-                                            ).head(300000)
+                                with st.expander("Show combined energy calculation table (first 200 rows)"):
+                                    st.dataframe(
+                                        df_all_energy[
+                                            ["__time__", "BCMU ID", "Total voltage", "Current", "power_kW", "dt_h", "dE_kWh"]
+                                        ]
+                                        .rename(
+                                            columns={
+                                                "__time__": "Time",
+                                                "Total voltage": "Rack Voltage (V)",
+                                                "Current": "Rack Current (A)",
+                                                "power_kW": "Power (kW)",
+                                                "dt_h": "Δt (h)",
+                                                "dE_kWh": "ΔE (kWh)",
+                                            }
                                         )
-                                else:
-                                    st.info("No combined energy rows to display for plotting.")
+                                        .head(200)
+                                    )
 
-# =================================================================
-# MAIN SECTION: CELL DETAIL
-# =================================================================
-elif main_page == "Cell Detail":
+
+# =========================
+# Cell Detail
+# =========================
+elif main_page == "CELL":
     st.subheader("Cell-Level Detail by Rack")
 
     st.write(
-        "Upload one file **per rack**. Each file should follow this format:\n"
+        "Upload one file **per rack**.\n"
         "- Columns: `Time`, `Serial number`, `V1..Vn` (e.g., V1–V396)\n"
-        "- Cell voltages in **mV** (e.g., 3350 = 3.350 V) or V if you uncheck the scaling box.\n"
-        "- First valid `Time` + `Serial number` row is used as the base timestamp; "
-        "other rows use `Serial number` as seconds offset."
+        "- Voltages can be **mV** (recommended) or **V**.\n"
+        "- First valid `Time` + `Serial number` row sets base timestamp; others use serial offset (seconds)."
     )
-
-    st.markdown("### Separate file per rack (each file like `Time, Serial number, V1..V396`)")
 
     num_racks = st.number_input(
         "How many racks do you want to upload?",
@@ -1312,8 +878,6 @@ elif main_page == "Cell Detail":
         key="num_racks",
     )
 
-    st.markdown("Upload files for each rack:")
-
     rack_configs = []
     for i in range(num_racks):
         col1, col2 = st.columns(2)
@@ -1321,28 +885,21 @@ elif main_page == "Cell Detail":
             rack_name = st.text_input(
                 f"Rack {i+1} name",
                 value=f"RACK{i:02d}",
-                key=f"multi_rack_name_{i}",
+                key=f"cell_rack_name_{i}",
             )
         with col2:
             rack_file = st.file_uploader(
                 f"File for Rack {i+1}",
                 type=["csv", "xlsx", "xls"],
-                key=f"multi_rack_file_{i}",
+                key=f"cell_rack_file_{i}",
             )
         rack_configs.append((rack_name, rack_file))
 
-    st.markdown("### ⚙ Value Scaling for Cell Voltage")
     scale_mV = st.checkbox(
-        "Cell voltage is stored in mV (e.g., 3313 = 3.313 V) → divide by 1000",
+        "Cell voltage stored in mV (e.g., 3313 = 3.313 V) → divide by 1000",
         value=True,
-        key="multi_scale_mV",
+        key="cell_scale_mv",
     )
-
-    def cell_index(name: str) -> int:
-        try:
-            return int(name[1:])
-        except Exception:
-            return 0
 
     combined_cells_snap = []
     time_series_list = []
@@ -1352,157 +909,117 @@ elif main_page == "Cell Detail":
             continue
 
         try:
-            fname = rack_file.name.lower()
-            if fname.endswith((".xlsx", ".xls")):
-                df_r = pd.read_excel(rack_file)
-            else:
-                df_r = pd.read_csv(rack_file)
+            df_r = read_any_table(rack_file)
         except Exception as e:
             st.warning(f"Could not read file for rack '{rack_name}': {e}")
             continue
 
-        df_r.columns = df_r.columns.str.strip()
+        df_r.columns = df_r.columns.astype(str).str.strip()
 
         if "Serial number" not in df_r.columns or "Time" not in df_r.columns:
-            st.warning(
-                f"Rack '{rack_name}': need 'Time' and 'Serial number' columns. "
-                "Skipping this file."
-            )
+            st.warning(f"Rack '{rack_name}': need 'Time' and 'Serial number' columns. Skipping.")
             continue
 
-        v_cols = [c for c in df_r.columns if c.upper().startswith("V")]
+        v_cols = [c for c in df_r.columns if str(c).upper().startswith("V")]
         if not v_cols:
-            st.warning(
-                f"Rack '{rack_name}' file has no V1/V2/... columns. Skipping this file."
-            )
+            st.warning(f"Rack '{rack_name}' file has no V1/V2/... columns. Skipping.")
             continue
 
-        valid_time_idx = df_r["Time"].first_valid_index()
-
-        if valid_time_idx is None:
-            st.warning(f"Rack '{rack_name}': No valid 'Time' found to establish a baseline.")
+        # Find base time row (first valid Time that is not "None"/empty)
+        time_str = df_r["Time"].astype(str).str.strip()
+        mask_valid_time = (time_str.str.lower() != "none") & (time_str != "")
+        if not mask_valid_time.any():
+            st.warning(f"Rack '{rack_name}': No valid 'Time' found to establish baseline.")
             continue
 
-        try:
-            base_time = pd.to_datetime(df_r.loc[valid_time_idx, "Time"])
-            base_serial = float(df_r.loc[valid_time_idx, "Serial number"])
-        except Exception as e:
-            st.warning(f"Rack '{rack_name}': Error parsing base time/serial: {e}")
+        base_idx = df_r[mask_valid_time].index[0]
+        base_time = pd.to_datetime(df_r.loc[base_idx, "Time"], errors="coerce")
+        base_serial = clean_numeric_series(pd.Series([df_r.loc[base_idx, "Serial number"]])).iloc[0]
+        if pd.isna(base_time) or pd.isna(base_serial):
+            st.warning(f"Rack '{rack_name}': Could not parse base time/serial.")
             continue
 
-        df_r["Serial number"] = pd.to_numeric(df_r["Serial number"], errors="coerce").fillna(0)
-
-        df_r["time_offset_s"] = df_r["Serial number"] - base_serial
-        df_r["calculated_time"] = base_time + pd.to_timedelta(df_r["time_offset_s"], unit="s")
-
+        df_r["Serial number"] = clean_numeric_series(df_r["Serial number"]).fillna(0)
+        df_r["calculated_time"] = base_time + pd.to_timedelta(df_r["Serial number"] - base_serial, unit="s")
         df_r = df_r.sort_values("calculated_time")
 
         for c in v_cols:
-            df_r[c] = pd.to_numeric(df_r[c], errors="coerce")
+            df_r[c] = clean_numeric_series(df_r[c])
 
         if scale_mV:
             df_r[v_cols] = df_r[v_cols] / 1000.0
 
+        # Snapshot (last row)
         if not df_r.empty:
-            last_row = df_r.iloc[-1]
+            last = df_r.iloc[-1]
             for col in v_cols:
-                idx = cell_index(col)
-                val = last_row[col]
                 combined_cells_snap.append(
                     {
                         "Rack": rack_name,
-                        "Cell Index": idx,
-                        "Voltage": val,
-                        "Time": last_row["calculated_time"],
+                        "Cell Index": cell_index(str(col)),
+                        "Voltage": last[col],
+                        "Time": last["calculated_time"],
                     }
                 )
 
-            df_r["Rack"] = rack_name
-            time_series_list.append(df_r)
+        df_r["Rack"] = rack_name
+        time_series_list.append(df_r)
 
     st.markdown("---")
 
     if not combined_cells_snap:
-        st.info("Upload rack files to see the cell heatmap and time-series plots.")
+        st.info("Upload rack cell files to see heatmap / stats.")
     else:
-        df_snap = pd.DataFrame(combined_cells_snap)
+        df_snap = pd.DataFrame(combined_cells_snap).dropna(subset=["Voltage"])
+        df_snap = df_snap.sort_values(["Rack", "Cell Index"])
 
         st.subheader("Latest Snapshot Heatmap (All Racks)")
-        df_snap = df_snap.sort_values(by=["Rack", "Cell Index"])
-
         fig_heat = px.density_heatmap(
             df_snap,
             x="Cell Index",
             y="Rack",
             z="Voltage",
             color_continuous_scale="RdYlGn",
-            text_auto=False,
             title=f"Cell Voltages at End of Log (Approx Time: {df_snap['Time'].max()})",
         )
-        fig_heat.update_layout(
-            xaxis_title="Cell Index",
-            yaxis_title="Rack ID",
-        )
+        fig_heat.update_layout(xaxis_title="Cell Index", yaxis_title="Rack ID")
         st.plotly_chart(fig_heat, use_container_width=True)
 
         st.subheader("Rack Statistics (Snapshot)")
         stats = df_snap.groupby("Rack")["Voltage"].agg(["min", "max", "mean", "count"]).reset_index()
         stats["delta"] = stats["max"] - stats["min"]
         st.dataframe(
-            stats.style.format(
-                {
-                    "min": "{:.3f}",
-                    "max": "{:.3f}",
-                    "mean": "{:.3f}",
-                    "delta": "{:.3f}",
-                }
-            )
+            stats.style.format({"min": "{:.3f}", "max": "{:.3f}", "mean": "{:.3f}", "delta": "{:.3f}"})
         )
 
         st.subheader("Delta (Max - Min) per Rack")
-        fig_bar = px.bar(
-            stats,
-            x="Rack",
-            y="delta",
-            title="Voltage Imbalance (Delta) by Rack",
-            color="delta",
-            color_continuous_scale="Reds",
+        st.plotly_chart(
+            px.bar(stats, x="Rack", y="delta", title="Voltage Imbalance (Delta) by Rack"),
+            use_container_width=True,
         )
-        st.plotly_chart(fig_bar, use_container_width=True)
 
     st.subheader("📈 All Cells: V vs Time")
 
     if not time_series_list:
-        st.info(
-            "Upload rack files with valid `Time`, `Serial number`, and V1..Vn data "
-            "to see full time-series plots."
-        )
+        st.info("Upload rack files to see V vs time.")
     else:
-        df_cells_time = pd.concat(time_series_list, ignore_index=True)
-
-        v_cols_all = [c for c in df_cells_time.columns if c.upper().startswith("V")]
+        df_cells = pd.concat(time_series_list, ignore_index=True)
+        v_cols_all = [c for c in df_cells.columns if str(c).upper().startswith("V")]
         if not v_cols_all:
-            st.info("No voltage columns found in time-series data.")
+            st.info("No V columns found for plotting.")
         else:
-            df_long = df_cells_time.melt(
+            df_long = df_cells.melt(
                 id_vars=["Rack", "calculated_time"],
                 value_vars=v_cols_all,
                 var_name="CellID",
                 value_name="Voltage_V",
             )
-            df_long["CellID"] = df_long["CellID"].apply(cell_index)
+            df_long["CellID"] = df_long["CellID"].astype(str).apply(cell_index)
             df_long = df_long.dropna(subset=["Voltage_V"])
 
-            racks_ts = ["All Racks"] + sorted(df_long["Rack"].unique())
-            selected_rack = st.selectbox(
-                "Select rack for time-series plot",
-                racks_ts,
-                key="ts_rack_sel",
-            )
-
-            df_plot = df_long
-            if selected_rack != "All Racks":
-                df_plot = df_plot[df_plot["Rack"] == selected_rack]
+            racks = ["All Racks"] + sorted(df_long["Rack"].unique())
+            selected_rack = st.selectbox("Select rack for time-series plot", racks, key="cell_ts_rack")
+            df_plot = df_long if selected_rack == "All Racks" else df_long[df_long["Rack"] == selected_rack]
 
             st.write(
                 f"Plotting **{df_plot['CellID'].nunique()} cells**, "
@@ -1518,10 +1035,5 @@ elif main_page == "Cell Detail":
                 title=f"Cell Voltages vs Time ({selected_rack})",
                 render_mode="webgl",
             )
-            fig_ts.update_layout(
-                height=700,
-                xaxis_title="Time",
-                yaxis_title="Cell Voltage (V)",
-                legend_title="Cell",
-            )
+            fig_ts.update_layout(height=700, xaxis_title="Time", yaxis_title="Cell Voltage (V)", legend_title="Cell")
             st.plotly_chart(fig_ts, use_container_width=True)
