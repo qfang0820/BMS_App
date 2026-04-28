@@ -25,6 +25,14 @@ ENERGY_SELECTOR_COMPONENT = components.component(
     html="""
     <div class="energy-selector">
       <div class="selection-summary" id="selection-summary">Drag on the chart to inspect data live.</div>
+      <div class="metrics-grid">
+        <div class="metric-card"><div class="metric-label">Energy OUT</div><div class="metric-value" id="metric-out">0.00 kWh</div></div>
+        <div class="metric-card"><div class="metric-label">Energy IN</div><div class="metric-value" id="metric-in">0.00 kWh</div></div>
+        <div class="metric-card"><div class="metric-label">Net</div><div class="metric-value" id="metric-net">0.00 kWh</div></div>
+        <div class="metric-card"><div class="metric-label">Window duration</div><div class="metric-value" id="metric-duration">0.00 h</div></div>
+        <div class="metric-card"><div class="metric-label">Average power</div><div class="metric-value" id="metric-avg-power">0.00 kW</div></div>
+        <div class="metric-card"><div class="metric-label">Peak discharge / charge</div><div class="metric-value" id="metric-peak">0.00 / 0.00 kW</div></div>
+      </div>
       <div class="chart-wrap"><div id="energy-chart"></div></div>
       <div class="table-wrap">
         <div class="table-title" id="selection-title">Selected Data</div>
@@ -49,6 +57,29 @@ ENERGY_SELECTOR_COMPONENT = components.component(
     .selection-summary {
       font-size: 0.95rem;
       color: var(--st-secondary-text-color);
+    }
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 0.75rem;
+    }
+    .metric-card {
+      border: 1px solid color-mix(in srgb, var(--st-border-color) 70%, transparent);
+      border-radius: 0.75rem;
+      padding: 0.85rem 0.9rem;
+      background: color-mix(in srgb, var(--st-bg-color) 92%, black 8%);
+      min-height: 92px;
+    }
+    .metric-label {
+      font-size: 0.82rem;
+      color: var(--st-secondary-text-color);
+      margin-bottom: 0.4rem;
+    }
+    .metric-value {
+      font-size: 1.6rem;
+      line-height: 1.15;
+      font-weight: 600;
+      letter-spacing: -0.02em;
     }
     .chart-wrap {
       height: 380px;
@@ -95,6 +126,19 @@ ENERGY_SELECTOR_COMPONENT = components.component(
     }
     .muted {
       color: var(--st-secondary-text-color);
+    }
+    @media (max-width: 1200px) {
+      .metrics-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+    }
+    @media (max-width: 720px) {
+      .metrics-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .metric-value {
+        font-size: 1.25rem;
+      }
     }
     """,
     js="""
@@ -144,19 +188,100 @@ ENERGY_SELECTOR_COMPONENT = components.component(
       const titleEl = parentElement.querySelector("#selection-title");
       const headEl = parentElement.querySelector("#selection-head");
       const bodyEl = parentElement.querySelector("#selection-body");
+      const metricOut = parentElement.querySelector("#metric-out");
+      const metricIn = parentElement.querySelector("#metric-in");
+      const metricNet = parentElement.querySelector("#metric-net");
+      const metricDuration = parentElement.querySelector("#metric-duration");
+      const metricAvgPower = parentElement.querySelector("#metric-avg-power");
+      const metricPeak = parentElement.querySelector("#metric-peak");
       const rows = data?.rows || [];
       const columns = data?.table_columns || [];
       const selectedIndicesFromPython = data?.selected_indices || [];
+      const maxGapSeconds = data?.max_gap_seconds ?? null;
       let destroyed = false;
+
+      function setMetricText(element, text) {
+        if (element) {
+          element.textContent = text;
+        }
+      }
+
+      function renderMetrics(indices) {
+        if (!rows.length) {
+          setMetricText(metricOut, "0.00 kWh");
+          setMetricText(metricIn, "0.00 kWh");
+          setMetricText(metricNet, "0.00 kWh");
+          setMetricText(metricDuration, "0.00 h");
+          setMetricText(metricAvgPower, "0.00 kW");
+          setMetricText(metricPeak, "0.00 / 0.00 kW");
+          return;
+        }
+
+        const safeIndices = [...new Set(indices)].filter((index) => index >= 0 && index < rows.length).sort((a, b) => a - b);
+        const startIndex = safeIndices.length >= 2 ? safeIndices[0] : 0;
+        const endIndex = safeIndices.length >= 2 ? safeIndices[safeIndices.length - 1] : rows.length - 1;
+        const windowRows = rows.slice(startIndex, endIndex + 1);
+
+        if (windowRows.length < 2) {
+          setMetricText(metricOut, "0.00 kWh");
+          setMetricText(metricIn, "0.00 kWh");
+          setMetricText(metricNet, "0.00 kWh");
+          setMetricText(metricDuration, "0.00 h");
+          setMetricText(metricAvgPower, "0.00 kW");
+          setMetricText(metricPeak, "0.00 / 0.00 kW");
+          return;
+        }
+
+        let eOut = 0;
+        let eIn = 0;
+        let durationH = 0;
+        const powers = [];
+        for (let i = 0; i < windowRows.length - 1; i += 1) {
+          const current = windowRows[i];
+          const next = windowRows[i + 1];
+          let dtS = (next.time_ms - current.time_ms) / 1000;
+          if (!Number.isFinite(dtS) || dtS <= 0) {
+            continue;
+          }
+          if (maxGapSeconds !== null && maxGapSeconds > 0) {
+            dtS = Math.min(dtS, maxGapSeconds);
+          }
+          const dtH = dtS / 3600;
+          const power = Number(current.preview_power_kW) || 0;
+          const dE = power * dtH;
+          durationH += dtH;
+          powers.push(power);
+          if (dE >= 0) {
+            eOut += dE;
+          } else {
+            eIn += -dE;
+          }
+        }
+
+        const eNet = eOut - eIn;
+        const avgPower = powers.length ? powers.reduce((sum, value) => sum + value, 0) / powers.length : 0;
+        const peakDischarge = powers.length ? Math.max(...powers.map((value) => Math.max(value, 0))) : 0;
+        const peakCharge = powers.length ? Math.max(...powers.map((value) => Math.max(-value, 0))) : 0;
+
+        setMetricText(metricOut, `${eOut.toFixed(2)} kWh`);
+        setMetricText(metricIn, `${eIn.toFixed(2)} kWh`);
+        setMetricText(metricNet, `${eNet.toFixed(2)} kWh`);
+        setMetricText(metricDuration, `${durationH.toFixed(2)} h`);
+        setMetricText(metricAvgPower, `${avgPower.toFixed(2)} kW`);
+        setMetricText(metricPeak, `${peakDischarge.toFixed(2)} / ${peakCharge.toFixed(2)} kW`);
+      }
 
       function renderTable(indices, liveMode) {
         const safeIndices = [...new Set(indices)].filter((index) => index >= 0 && index < rows.length).sort((a, b) => a - b);
-        const displayRows = safeIndices.map((index) => rows[index]);
+        const startIndex = safeIndices.length >= 2 ? safeIndices[0] : 0;
+        const endIndex = safeIndices.length >= 2 ? safeIndices[safeIndices.length - 1] : rows.length - 1;
+        const displayRows = rows.slice(startIndex, endIndex + 1);
         const maxRows = 150;
         const visibleRows = displayRows.slice(0, maxRows);
 
         headEl.innerHTML = "";
         bodyEl.innerHTML = "";
+        renderMetrics(safeIndices);
 
         const headRow = document.createElement("tr");
         for (const column of columns) {
@@ -175,7 +300,7 @@ ENERGY_SELECTOR_COMPONENT = components.component(
           row.appendChild(td);
           bodyEl.appendChild(row);
           titleEl.textContent = "Selected Data";
-          summaryEl.textContent = "Drag on the chart to inspect data live. Release the mouse to update the energy metrics below.";
+          summaryEl.textContent = "Drag on the chart to inspect data live.";
           return;
         }
 
@@ -192,8 +317,8 @@ ENERGY_SELECTOR_COMPONENT = components.component(
         const firstRow = displayRows[0];
         const lastRow = displayRows[displayRows.length - 1];
         const suffix = displayRows.length > maxRows ? `, showing first ${maxRows}` : "";
-        titleEl.textContent = `Selected Data (${displayRows.length} points${suffix})`;
-        summaryEl.textContent = `${liveMode ? "Selecting" : "Selected"} window: ${firstRow.Time} → ${lastRow.Time}`;
+        titleEl.textContent = `${safeIndices.length >= 2 ? "Selected Window Data" : "Full Window Data"} (${displayRows.length} points${suffix})`;
+        summaryEl.textContent = `${liveMode ? "Selecting" : safeIndices.length >= 2 ? "Selected" : "Full"} window: ${firstRow.Time} → ${lastRow.Time}`;
       }
 
       function publishSelection(indices) {
@@ -302,6 +427,256 @@ ENERGY_SELECTOR_COMPONENT = components.component(
     """,
 )
 
+OVERVIEW_SELECTOR_COMPONENT = components.component(
+    name="overview_live_selector_v1",
+    html="""
+    <div class="overview-selector">
+      <div class="selection-summary" id="selection-summary">Drag on the chart to inspect data live.</div>
+      <div class="chart-wrap"><div id="overview-chart"></div></div>
+      <div class="table-wrap">
+        <div class="table-title" id="selection-title">Selected Data</div>
+        <div class="table-scroll">
+          <table>
+            <thead id="selection-head"></thead>
+            <tbody id="selection-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    """,
+    css="""
+    .overview-selector {
+      width: 100%;
+      display: grid;
+      gap: 0.75rem;
+      color: var(--st-text-color);
+      font-family: var(--st-font);
+    }
+    .selection-summary {
+      font-size: 0.95rem;
+      color: var(--st-secondary-text-color);
+    }
+    .chart-wrap {
+      height: 380px;
+      border: 1px solid color-mix(in srgb, var(--st-border-color) 70%, transparent);
+      border-radius: 0.75rem;
+      overflow: hidden;
+      background: color-mix(in srgb, var(--st-bg-color) 88%, black 12%);
+    }
+    #overview-chart {
+      width: 100%;
+      height: 100%;
+    }
+    .table-wrap {
+      border: 1px solid color-mix(in srgb, var(--st-border-color) 70%, transparent);
+      border-radius: 0.75rem;
+      overflow: hidden;
+      background: color-mix(in srgb, var(--st-bg-color) 92%, black 8%);
+    }
+    .table-title {
+      padding: 0.75rem 0.9rem;
+      font-weight: 600;
+      border-bottom: 1px solid color-mix(in srgb, var(--st-border-color) 70%, transparent);
+    }
+    .table-scroll {
+      max-height: 250px;
+      overflow: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+    th, td {
+      padding: 0.55rem 0.7rem;
+      border-bottom: 1px solid color-mix(in srgb, var(--st-border-color) 50%, transparent);
+      text-align: left;
+      white-space: nowrap;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      background: color-mix(in srgb, var(--st-bg-color) 94%, black 6%);
+      z-index: 1;
+    }
+    .muted {
+      color: var(--st-secondary-text-color);
+    }
+    """,
+    js="""
+    const PLOTLY_URL = "https://cdn.plot.ly/plotly-2.35.2.min.js";
+    let plotlyPromise = null;
+
+    function loadPlotly() {
+      if (window.Plotly) {
+        return Promise.resolve(window.Plotly);
+      }
+      if (!plotlyPromise) {
+        plotlyPromise = new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = PLOTLY_URL;
+          script.onload = () => resolve(window.Plotly);
+          script.onerror = reject;
+          document.head.appendChild(script);
+        });
+      }
+      return plotlyPromise;
+    }
+
+    function formatValue(value) {
+      if (value === null || value === undefined || value === "") {
+        return "";
+      }
+      if (typeof value === "number" && Number.isFinite(value)) {
+        return Math.abs(value) >= 100 ? value.toFixed(2) : value.toFixed(3);
+      }
+      return String(value);
+    }
+
+    function uniqueSortedIndices(points) {
+      const indices = [];
+      for (const point of points || []) {
+        if (Number.isInteger(point.pointNumber)) {
+          indices.push(point.pointNumber);
+        }
+      }
+      return [...new Set(indices)].sort((a, b) => a - b);
+    }
+
+    export default function(component) {
+      const { parentElement, data } = component;
+      const chartDiv = parentElement.querySelector("#overview-chart");
+      const summaryEl = parentElement.querySelector("#selection-summary");
+      const titleEl = parentElement.querySelector("#selection-title");
+      const headEl = parentElement.querySelector("#selection-head");
+      const bodyEl = parentElement.querySelector("#selection-body");
+      const rows = data?.rows || [];
+      const columns = data?.table_columns || [];
+      const traces = data?.traces || [];
+      let destroyed = false;
+
+      function renderTable(indices, liveMode) {
+        const safeIndices = [...new Set(indices)].filter((index) => index >= 0 && index < rows.length).sort((a, b) => a - b);
+        const startIndex = safeIndices.length >= 2 ? safeIndices[0] : 0;
+        const endIndex = safeIndices.length >= 2 ? safeIndices[safeIndices.length - 1] : rows.length - 1;
+        const displayRows = rows.slice(startIndex, endIndex + 1);
+        const maxRows = 120;
+        const visibleRows = displayRows.slice(0, maxRows);
+
+        headEl.innerHTML = "";
+        bodyEl.innerHTML = "";
+
+        const headRow = document.createElement("tr");
+        for (const column of columns) {
+          const th = document.createElement("th");
+          th.textContent = column.label;
+          headRow.appendChild(th);
+        }
+        headEl.appendChild(headRow);
+
+        if (!visibleRows.length) {
+          const row = document.createElement("tr");
+          const td = document.createElement("td");
+          td.colSpan = Math.max(columns.length, 1);
+          td.className = "muted";
+          td.textContent = "No points selected yet. Drag on the chart to preview rows live.";
+          row.appendChild(td);
+          bodyEl.appendChild(row);
+          titleEl.textContent = "Selected Data";
+          summaryEl.textContent = "Drag on the chart to inspect data live.";
+          return;
+        }
+
+        for (const rowData of visibleRows) {
+          const tr = document.createElement("tr");
+          for (const column of columns) {
+            const td = document.createElement("td");
+            td.textContent = formatValue(rowData[column.key]);
+            tr.appendChild(td);
+          }
+          bodyEl.appendChild(tr);
+        }
+
+        const firstRow = displayRows[0];
+        const lastRow = displayRows[displayRows.length - 1];
+        const suffix = displayRows.length > maxRows ? `, showing first ${maxRows}` : "";
+        titleEl.textContent = `${safeIndices.length >= 2 ? "Selected Window Data" : "Full Window Data"} (${displayRows.length} points${suffix})`;
+        summaryEl.textContent = `${liveMode ? "Selecting" : safeIndices.length >= 2 ? "Selected" : "Full"} window: ${firstRow.Time} → ${lastRow.Time}`;
+      }
+
+      loadPlotly()
+        .then((Plotly) => {
+          if (destroyed) {
+            return;
+          }
+
+          const plotTraces = traces.map((trace) => ({
+            x: rows.map((row) => row.Time),
+            y: rows.map((row) => row[trace.key]),
+            name: trace.label,
+            mode: "lines+markers",
+            type: "scatter",
+            marker: { size: 4 },
+            line: { width: 2, color: trace.color || undefined },
+            hovertemplate: `${trace.label}: %{y}<br>Time: %{x}<extra></extra>`,
+          }));
+
+          const layout = {
+            title: { text: data?.title || "Live Selection", font: { color: "#ffffff" } },
+            dragmode: "select",
+            paper_bgcolor: "rgba(0,0,0,0)",
+            plot_bgcolor: "rgba(0,0,0,0)",
+            margin: { l: 50, r: 20, t: 50, b: 50 },
+            xaxis: {
+              title: { text: "Time" },
+              color: "#d5d9e0",
+              gridcolor: "rgba(120, 130, 150, 0.22)",
+            },
+            yaxis: {
+              title: { text: data?.yaxis_title || "" },
+              color: "#d5d9e0",
+              gridcolor: "rgba(120, 130, 150, 0.22)",
+            },
+          };
+
+          Plotly.react(chartDiv, plotTraces, layout, {
+            responsive: true,
+            displaylogo: false,
+            modeBarButtonsToRemove: ["lasso2d"],
+          });
+          renderTable([], false);
+
+          if (typeof chartDiv.removeAllListeners === "function") {
+            chartDiv.removeAllListeners("plotly_selecting");
+            chartDiv.removeAllListeners("plotly_selected");
+            chartDiv.removeAllListeners("plotly_deselect");
+            chartDiv.removeAllListeners("plotly_doubleclick");
+          }
+
+          chartDiv.on("plotly_selecting", (eventData) => {
+            renderTable(uniqueSortedIndices(eventData?.points), true);
+          });
+          chartDiv.on("plotly_selected", (eventData) => {
+            renderTable(uniqueSortedIndices(eventData?.points), false);
+          });
+          chartDiv.on("plotly_deselect", () => {
+            renderTable([], false);
+          });
+          chartDiv.on("plotly_doubleclick", () => {
+            renderTable([], false);
+          });
+        })
+        .catch((error) => {
+          summaryEl.textContent = `Failed to load interactive selector: ${error}`;
+        });
+
+      return () => {
+        destroyed = true;
+      };
+    }
+    """,
+)
+
 # =========================
 # Helpers
 # =========================
@@ -350,6 +725,45 @@ def get_component_state_value(key: str, field: str, default):
         value = state.get(field)
         return default if value is None else value
     return default
+
+
+def render_live_overview_chart(
+    source_df: pd.DataFrame,
+    *,
+    title: str,
+    y_columns: list[str],
+    yaxis_title: str,
+    key: str,
+) -> None:
+    table_columns = [{"key": "Time", "label": "Time"}]
+    traces = []
+    palette = ["#7cc6ff", "#ff9f43", "#5ad8a6", "#ff6b8a"]
+    for index, column in enumerate(y_columns):
+        table_columns.append({"key": column, "label": column})
+        traces.append({"key": column, "label": column, "color": palette[index % len(palette)]})
+
+    optional_columns = ["Sequence", "MAX CELL", "MAX CELL POS", "MIN CELL", "MIN CELL POS", "cell_delta"]
+    existing_optional_columns = [column for column in optional_columns if column in source_df.columns]
+    for column in existing_optional_columns:
+        table_columns.append({"key": column, "label": column})
+
+    selector_df = source_df[["__time__", "Time", *y_columns, *existing_optional_columns]].copy()
+    selector_df["Time"] = selector_df["__time__"].dt.strftime("%Y-%m-%d %H:%M:%S")
+    selector_df = selector_df.drop(columns="__time__")
+    selector_df = selector_df.where(pd.notna(selector_df), None)
+
+    OVERVIEW_SELECTOR_COMPONENT(
+        data={
+            "title": title,
+            "yaxis_title": yaxis_title,
+            "rows": selector_df.to_dict("records"),
+            "table_columns": table_columns,
+            "traces": traces,
+        },
+        key=key,
+        width="stretch",
+        height="content",
+    )
 
 
 def compute_energy(
@@ -517,11 +931,12 @@ if page == "Overview":
 
     st.markdown("---")
 
-    st.plotly_chart(
-        px.line(df, x="__time__", y="Stack voltage", title="Stack Voltage").update_layout(
-            xaxis_title="Time", yaxis_title="V"
-        ),
-        use_container_width=True,
+    render_live_overview_chart(
+        df,
+        title="Stack Voltage",
+        y_columns=["Stack voltage"],
+        yaxis_title="V",
+        key="overview_stack_voltage_live",
     )
 
     # Optional cell plots
@@ -532,33 +947,37 @@ if page == "Overview":
         cell_series.append("MAX CELL")
 
     if cell_series:
-        st.plotly_chart(
-            px.line(df, x="__time__", y=cell_series, title="Cell Voltages (Optional)").update_layout(
-                xaxis_title="Time", yaxis_title="V"
-            ),
-            use_container_width=True,
+        render_live_overview_chart(
+            df,
+            title="Cell Voltages (Optional)",
+            y_columns=cell_series,
+            yaxis_title="V",
+            key="overview_cell_voltage_live",
         )
 
     if "cell_delta" in df.columns and df["cell_delta"].notna().any():
-        st.plotly_chart(
-            px.line(df, x="__time__", y="cell_delta", title="Cell Delta (MAX - MIN, Optional)").update_layout(
-                xaxis_title="Time", yaxis_title="V"
-            ),
-            use_container_width=True,
+        render_live_overview_chart(
+            df,
+            title="Cell Delta (MAX - MIN, Optional)",
+            y_columns=["cell_delta"],
+            yaxis_title="V",
+            key="overview_cell_delta_live",
         )
 
-    st.plotly_chart(
-        px.line(df, x="__time__", y="Stack current", title="Stack Current").update_layout(
-            xaxis_title="Time", yaxis_title="A"
-        ),
-        use_container_width=True,
+    render_live_overview_chart(
+        df,
+        title="Stack Current",
+        y_columns=["Stack current"],
+        yaxis_title="A",
+        key="overview_stack_current_live",
     )
 
-    st.plotly_chart(
-        px.line(df, x="__time__", y="SOC", title="SoC").update_layout(
-            xaxis_title="Time", yaxis_title="%"
-        ),
-        use_container_width=True,
+    render_live_overview_chart(
+        df,
+        title="SoC",
+        y_columns=["SOC"],
+        yaxis_title="%",
+        key="overview_soc_live",
     )
 
     with st.expander("Diagnostics"):
@@ -598,6 +1017,7 @@ elif page == "Energy":
         ["__time__", "Time", "Stack voltage", "Stack current", "SOC", "preview_power_kW", *existing_optional_table_columns]
     ].copy()
     selector_df["Time"] = selector_df["__time__"].dt.strftime("%Y-%m-%d %H:%M:%S")
+    selector_df["time_ms"] = (df2["__time__"].astype("int64") // 10**6).astype("int64")
     selector_df = selector_df.drop(columns="__time__")
     selector_df = selector_df.where(pd.notna(selector_df), None)
 
@@ -606,6 +1026,7 @@ elif page == "Energy":
             "rows": selector_df.to_dict("records"),
             "table_columns": table_columns,
             "selected_indices": current_selected_indices,
+            "max_gap_seconds": max_gap_seconds,
         },
         default={"selected_indices": current_selected_indices},
         on_selected_indices_change=lambda: None,
@@ -646,19 +1067,6 @@ elif page == "Energy":
     if calc.empty:
         st.warning("Not enough valid intervals to compute energy.")
         st.stop()
-
-    duration_h = float(calc["dt_h"].sum())
-    avg_power_kw = float(calc["power_kW"].mean())
-    peak_discharge_kw = float(calc["power_kW"].clip(lower=0).max())
-    peak_charge_kw = float(calc["power_kW"].clip(upper=0).abs().max())
-
-    a, b, c, d, e, f = st.columns(6)
-    a.metric("Energy OUT (discharge)", f"{e_out:.2f} kWh")
-    b.metric("Energy IN (charge)", f"{e_in:.2f} kWh")
-    c.metric("Net (OUT - IN)", f"{e_net:.2f} kWh")
-    d.metric("Window duration", f"{duration_h:.2f} h")
-    e.metric("Average power", f"{avg_power_kw:.2f} kW")
-    f.metric("Peak discharge / charge", f"{peak_discharge_kw:.2f} / {peak_charge_kw:.2f} kW")
 
     st.plotly_chart(
         px.line(calc, x="__time__", y="power_kW", title="Power (kW)").update_layout(
