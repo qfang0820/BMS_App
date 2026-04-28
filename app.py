@@ -307,6 +307,15 @@ elif page == "Energy":
     if selection_event and "selection" in selection_event:
         selected_indices = sorted(selection_event["selection"].get("point_indices", []))
 
+    if selected_indices:
+        selected_rows = df2.iloc[selected_indices].copy()
+        selected_show_cols = ["Time", "__time__", "Stack voltage", "Stack current", "SOC", "preview_power_kW"]
+        for c in ["Sequence", "MAX CELL", "MAX CELL POS", "MIN CELL", "MIN CELL POS", "cell_delta"]:
+            if c in selected_rows.columns:
+                selected_show_cols.append(c)
+        st.markdown(f"#### Selected Data ({len(selected_rows)} points)")
+        st.dataframe(selected_rows[selected_show_cols], use_container_width=True)
+
     if len(selected_indices) >= 2:
         start_i = selected_indices[0]
         end_i = selected_indices[-1]
