@@ -1014,8 +1014,20 @@ elif page == "Energy":
         st.warning("Not enough points to compute energy.")
         st.stop()
 
+    energy_slider_key = "energy_window_slider"
+    current_window = st.session_state.get(energy_slider_key, (0, len(df2) - 1))
+    start_default = max(0, min(int(current_window[0]), len(df2) - 1))
+    end_default = max(start_default, min(int(current_window[1]), len(df2) - 1))
+    st.session_state[energy_slider_key] = (start_default, end_default)
+
     # Fast index slider (handles duplicate timestamps)
-    start_i, end_i = st.slider("Select window (index-based)", 0, len(df2) - 1, (0, len(df2) - 1))
+    start_i, end_i = st.slider(
+        "Select window (index-based)",
+        0,
+        len(df2) - 1,
+        value=st.session_state[energy_slider_key],
+        key=energy_slider_key,
+    )
     start_t = df2.iloc[start_i]["__time__"]
     end_t = df2.iloc[end_i]["__time__"]
     st.caption(f"Selected: {start_t} → {end_t}")
@@ -1068,12 +1080,44 @@ elif page == "Energy":
     calc["cum_charge_display"] = calc["cum_charge_kWh"] / energy_scale
     calc["net_energy_display"] = calc["net_energy_kWh"] / energy_scale
 
-    st.plotly_chart(
-        px.line(calc, x="__time__", y="power_display", title=f"Power ({power_unit})").update_layout(
-            xaxis_title="Time", yaxis_title=power_unit
-        ),
-        use_container_width=True,
+    power_fig = px.line(calc, x="__time__", y="power_display", title=f"Power ({power_unit})").update_layout(
+        xaxis_title="Time",
+        yaxis_title=power_unit,
+        dragmode="select",
+        selectdirection="h",
     )
+    power_fig.update_traces(mode="lines+markers", marker={"size": 5})
+
+    power_selection = st.plotly_chart(
+        power_fig,
+        use_container_width=True,
+        key="energy_power_selector_chart",
+        on_select="rerun",
+        selection_mode="box",
+        config={"displaylogo": False, "modeBarButtonsToRemove": ["lasso2d"]},
+    )
+
+    selected_points = list(power_selection.selection.points) if power_selection else []
+    selection_signature = tuple(
+        point.get("point_index") for point in selected_points if point.get("point_index") is not None
+    )
+    last_applied_signature = st.session_state.get("energy_power_last_applied_signature")
+
+    if len(selection_signature) >= 2 and selection_signature != last_applied_signature:
+        local_indices = sorted(set(int(point_index) for point_index in selection_signature))
+        selected_calc = calc.iloc[local_indices]
+        graph_start_i = int(selected_calc.index.min())
+        graph_end_i = min(len(df2) - 1, int(selected_calc.index.max()) + 1)
+        graph_window = (graph_start_i, max(graph_start_i + 1, graph_end_i))
+        if graph_window != st.session_state[energy_slider_key]:
+            st.session_state[energy_slider_key] = graph_window
+        st.session_state["energy_power_last_applied_signature"] = selection_signature
+        st.rerun()
+
+    if not selection_signature and last_applied_signature:
+        st.session_state["energy_power_last_applied_signature"] = ()
+
+    st.caption("You can also drag horizontally on the power chart to narrow the same time window.")
 
     st.plotly_chart(
         px.line(
