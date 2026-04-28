@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v2 as components
 import pandas as pd
 import numpy as np
 import plotly.express as px
@@ -18,6 +19,288 @@ COLUMN_ALIASES = {
     "堆最低电压": "MIN CELL",
     "堆最低电压位置": "MIN CELL POS",
 }
+
+ENERGY_SELECTOR_COMPONENT = components.component(
+    name="energy_live_selector_v1",
+    html="""
+    <div class="energy-selector">
+      <div class="selection-summary" id="selection-summary">Drag on the chart to inspect data live.</div>
+      <div class="chart-wrap"><div id="energy-chart"></div></div>
+      <div class="table-wrap">
+        <div class="table-title" id="selection-title">Selected Data</div>
+        <div class="table-scroll">
+          <table>
+            <thead id="selection-head"></thead>
+            <tbody id="selection-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    """,
+    css="""
+    .energy-selector {
+      width: 100%;
+      height: 100%;
+      display: grid;
+      gap: 0.75rem;
+      color: var(--st-text-color);
+      font-family: var(--st-font);
+    }
+    .selection-summary {
+      font-size: 0.95rem;
+      color: var(--st-secondary-text-color);
+    }
+    .chart-wrap {
+      height: 380px;
+      border: 1px solid color-mix(in srgb, var(--st-border-color) 70%, transparent);
+      border-radius: 0.75rem;
+      overflow: hidden;
+      background: color-mix(in srgb, var(--st-bg-color) 88%, black 12%);
+    }
+    #energy-chart {
+      width: 100%;
+      height: 100%;
+    }
+    .table-wrap {
+      border: 1px solid color-mix(in srgb, var(--st-border-color) 70%, transparent);
+      border-radius: 0.75rem;
+      overflow: hidden;
+      background: color-mix(in srgb, var(--st-bg-color) 92%, black 8%);
+    }
+    .table-title {
+      padding: 0.75rem 0.9rem;
+      font-weight: 600;
+      border-bottom: 1px solid color-mix(in srgb, var(--st-border-color) 70%, transparent);
+    }
+    .table-scroll {
+      max-height: 250px;
+      overflow: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+    th, td {
+      padding: 0.55rem 0.7rem;
+      border-bottom: 1px solid color-mix(in srgb, var(--st-border-color) 50%, transparent);
+      text-align: left;
+      white-space: nowrap;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      background: color-mix(in srgb, var(--st-bg-color) 94%, black 6%);
+      z-index: 1;
+    }
+    .muted {
+      color: var(--st-secondary-text-color);
+    }
+    """,
+    js="""
+    const PLOTLY_URL = "https://cdn.plot.ly/plotly-2.35.2.min.js";
+    let plotlyPromise = null;
+
+    function loadPlotly() {
+      if (window.Plotly) {
+        return Promise.resolve(window.Plotly);
+      }
+      if (!plotlyPromise) {
+        plotlyPromise = new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = PLOTLY_URL;
+          script.onload = () => resolve(window.Plotly);
+          script.onerror = reject;
+          document.head.appendChild(script);
+        });
+      }
+      return plotlyPromise;
+    }
+
+    function formatValue(value) {
+      if (value === null || value === undefined || value === "") {
+        return "";
+      }
+      if (typeof value === "number" && Number.isFinite(value)) {
+        return Math.abs(value) >= 100 ? value.toFixed(2) : value.toFixed(3);
+      }
+      return String(value);
+    }
+
+    function uniqueSortedIndices(points) {
+      const indices = [];
+      for (const point of points || []) {
+        if (Number.isInteger(point.pointNumber)) {
+          indices.push(point.pointNumber);
+        }
+      }
+      return [...new Set(indices)].sort((a, b) => a - b);
+    }
+
+    export default function(component) {
+      const { parentElement, data, setStateValue } = component;
+      const chartDiv = parentElement.querySelector("#energy-chart");
+      const summaryEl = parentElement.querySelector("#selection-summary");
+      const titleEl = parentElement.querySelector("#selection-title");
+      const headEl = parentElement.querySelector("#selection-head");
+      const bodyEl = parentElement.querySelector("#selection-body");
+      const rows = data?.rows || [];
+      const columns = data?.table_columns || [];
+      const selectedIndicesFromPython = data?.selected_indices || [];
+      let destroyed = false;
+
+      function renderTable(indices, liveMode) {
+        const safeIndices = [...new Set(indices)].filter((index) => index >= 0 && index < rows.length).sort((a, b) => a - b);
+        const displayRows = safeIndices.map((index) => rows[index]);
+        const maxRows = 150;
+        const visibleRows = displayRows.slice(0, maxRows);
+
+        headEl.innerHTML = "";
+        bodyEl.innerHTML = "";
+
+        const headRow = document.createElement("tr");
+        for (const column of columns) {
+          const th = document.createElement("th");
+          th.textContent = column.label;
+          headRow.appendChild(th);
+        }
+        headEl.appendChild(headRow);
+
+        if (!visibleRows.length) {
+          const row = document.createElement("tr");
+          const td = document.createElement("td");
+          td.colSpan = Math.max(columns.length, 1);
+          td.className = "muted";
+          td.textContent = "No points selected yet. Drag on the chart to preview rows live.";
+          row.appendChild(td);
+          bodyEl.appendChild(row);
+          titleEl.textContent = "Selected Data";
+          summaryEl.textContent = "Drag on the chart to inspect data live. Release the mouse to update the energy metrics below.";
+          return;
+        }
+
+        for (const rowData of visibleRows) {
+          const tr = document.createElement("tr");
+          for (const column of columns) {
+            const td = document.createElement("td");
+            td.textContent = formatValue(rowData[column.key]);
+            tr.appendChild(td);
+          }
+          bodyEl.appendChild(tr);
+        }
+
+        const firstRow = displayRows[0];
+        const lastRow = displayRows[displayRows.length - 1];
+        const suffix = displayRows.length > maxRows ? `, showing first ${maxRows}` : "";
+        titleEl.textContent = `Selected Data (${displayRows.length} points${suffix})`;
+        summaryEl.textContent = `${liveMode ? "Selecting" : "Selected"} window: ${firstRow.Time} → ${lastRow.Time}`;
+      }
+
+      function publishSelection(indices) {
+        setStateValue("selected_indices", indices);
+      }
+
+      loadPlotly()
+        .then((Plotly) => {
+          if (destroyed) {
+            return;
+          }
+
+          const trace = {
+            x: rows.map((row) => row.Time),
+            y: rows.map((row) => row.preview_power_kW),
+            mode: "lines+markers",
+            type: "scatter",
+            marker: {
+              size: 5,
+              color: "#7cc6ff",
+            },
+            line: {
+              color: "#7cc6ff",
+              width: 2,
+            },
+            selectedpoints: selectedIndicesFromPython.length ? selectedIndicesFromPython : null,
+            selected: {
+              marker: {
+                color: "#ff9f43",
+                size: 6,
+              },
+            },
+            unselected: {
+              marker: {
+                opacity: 0.35,
+              },
+              line: {
+                opacity: 0.45,
+              },
+            },
+            hovertemplate: "Time: %{x}<br>Power: %{y:.2f} kW<extra></extra>",
+          };
+
+          const layout = {
+            title: { text: "Select Energy Window", font: { color: "#ffffff" } },
+            dragmode: "select",
+            paper_bgcolor: "rgba(0,0,0,0)",
+            plot_bgcolor: "rgba(0,0,0,0)",
+            margin: { l: 50, r: 20, t: 50, b: 50 },
+            xaxis: {
+              title: { text: "Time" },
+              color: "#d5d9e0",
+              gridcolor: "rgba(120, 130, 150, 0.22)",
+            },
+            yaxis: {
+              title: { text: "kW" },
+              color: "#d5d9e0",
+              gridcolor: "rgba(120, 130, 150, 0.22)",
+            },
+          };
+
+          const config = {
+            responsive: true,
+            displaylogo: false,
+            modeBarButtonsToRemove: ["lasso2d"],
+          };
+
+          Plotly.react(chartDiv, [trace], layout, config);
+          renderTable(selectedIndicesFromPython, false);
+
+          if (typeof chartDiv.removeAllListeners === "function") {
+            chartDiv.removeAllListeners("plotly_selecting");
+            chartDiv.removeAllListeners("plotly_selected");
+            chartDiv.removeAllListeners("plotly_deselect");
+            chartDiv.removeAllListeners("plotly_doubleclick");
+          }
+
+          chartDiv.on("plotly_selecting", (eventData) => {
+            renderTable(uniqueSortedIndices(eventData?.points), true);
+          });
+
+          chartDiv.on("plotly_selected", (eventData) => {
+            const indices = uniqueSortedIndices(eventData?.points);
+            renderTable(indices, false);
+            publishSelection(indices);
+          });
+
+          chartDiv.on("plotly_deselect", () => {
+            renderTable([], false);
+            publishSelection([]);
+          });
+
+          chartDiv.on("plotly_doubleclick", () => {
+            renderTable([], false);
+            publishSelection([]);
+          });
+        })
+        .catch((error) => {
+          summaryEl.textContent = `Failed to load interactive selector: ${error}`;
+        });
+
+      return () => {
+        destroyed = true;
+      };
+    }
+    """,
+)
 
 # =========================
 # Helpers
@@ -54,6 +337,19 @@ def read_any_table(uploaded_file) -> pd.DataFrame:
 def normalize_bms_columns(df: pd.DataFrame) -> pd.DataFrame:
     aliases = {source: target for source, target in COLUMN_ALIASES.items() if source in df.columns}
     return df.rename(columns=aliases)
+
+
+def get_component_state_value(key: str, field: str, default):
+    state = st.session_state.get(key)
+    if state is None:
+        return default
+    if hasattr(state, field):
+        value = getattr(state, field)
+        return default if value is None else value
+    if isinstance(state, dict):
+        value = state.get(field)
+        return default if value is None else value
+    return default
 
 
 def compute_energy(
@@ -283,38 +579,42 @@ elif page == "Energy":
         st.stop()
 
     df2["preview_power_kW"] = (df2["Stack voltage"] * df2["Stack current"]) / 1000.0
-    selection_fig = px.line(
-        df2,
-        x="__time__",
-        y="preview_power_kW",
-        title="Select Energy Window",
-        markers=True,
-    ).update_layout(
-        xaxis_title="Time",
-        yaxis_title="kW",
-        dragmode="select",
-    )
-    selection_fig.update_traces(marker={"size": 5})
-    selection_event = st.plotly_chart(
-        selection_fig,
-        use_container_width=True,
-        key="energy_window_selector",
-        on_select="rerun",
-        selection_mode=("box",),
+    component_key = "energy_live_selector"
+    current_selected_indices = get_component_state_value(component_key, "selected_indices", [])
+    table_columns = [
+        {"key": "Time", "label": "Time"},
+        {"key": "Stack voltage", "label": "Stack voltage"},
+        {"key": "Stack current", "label": "Stack current"},
+        {"key": "SOC", "label": "SOC"},
+        {"key": "preview_power_kW", "label": "Power (kW)"},
+    ]
+    optional_table_columns = ["Sequence", "MAX CELL", "MAX CELL POS", "MIN CELL", "MIN CELL POS", "cell_delta"]
+    existing_optional_table_columns = [column for column in optional_table_columns if column in df2.columns]
+    for column in optional_table_columns:
+        if column in df2.columns:
+            table_columns.append({"key": column, "label": column})
+
+    selector_df = df2[
+        ["__time__", "Time", "Stack voltage", "Stack current", "SOC", "preview_power_kW", *existing_optional_table_columns]
+    ].copy()
+    selector_df["Time"] = selector_df["__time__"].dt.strftime("%Y-%m-%d %H:%M:%S")
+    selector_df = selector_df.drop(columns="__time__")
+    selector_df = selector_df.where(pd.notna(selector_df), None)
+
+    selection_result = ENERGY_SELECTOR_COMPONENT(
+        data={
+            "rows": selector_df.to_dict("records"),
+            "table_columns": table_columns,
+            "selected_indices": current_selected_indices,
+        },
+        default={"selected_indices": current_selected_indices},
+        on_selected_indices_change=lambda: None,
+        key=component_key,
+        width="stretch",
+        height="content",
     )
 
-    selected_indices = []
-    if selection_event and "selection" in selection_event:
-        selected_indices = sorted(selection_event["selection"].get("point_indices", []))
-
-    if selected_indices:
-        selected_rows = df2.iloc[selected_indices].copy()
-        selected_show_cols = ["Time", "__time__", "Stack voltage", "Stack current", "SOC", "preview_power_kW"]
-        for c in ["Sequence", "MAX CELL", "MAX CELL POS", "MIN CELL", "MIN CELL POS", "cell_delta"]:
-            if c in selected_rows.columns:
-                selected_show_cols.append(c)
-        st.markdown(f"#### Selected Data ({len(selected_rows)} points)")
-        st.dataframe(selected_rows[selected_show_cols], use_container_width=True)
+    selected_indices = sorted((selection_result.selected_indices or []) if selection_result else [])
 
     if len(selected_indices) >= 2:
         start_i = selected_indices[0]
