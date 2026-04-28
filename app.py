@@ -1014,6 +1014,10 @@ elif page == "Energy":
         st.warning("Not enough points to compute energy.")
         st.stop()
 
+    df2["preview_power_kW"] = (df2["Stack voltage"] * df2["Stack current"]) / 1000.0
+    power_scale, power_unit = choose_display_unit(float(df2["preview_power_kW"].abs().max()), "kW", "MW")
+    df2["preview_power_display"] = df2["preview_power_kW"] / power_scale
+
     energy_slider_key = "energy_window_slider"
     current_window = st.session_state.get(energy_slider_key, (0, len(df2) - 1))
     start_default = max(0, min(int(current_window[0]), len(df2) - 1))
@@ -1049,7 +1053,6 @@ elif page == "Energy":
         st.warning("Not enough valid intervals to compute energy.")
         st.stop()
 
-    power_scale, power_unit = choose_display_unit(float(calc["power_kW"].abs().max()), "kW", "MW")
     energy_abs_max = max(
         e_out,
         e_in,
@@ -1080,13 +1083,25 @@ elif page == "Energy":
     calc["cum_charge_display"] = calc["cum_charge_kWh"] / energy_scale
     calc["net_energy_display"] = calc["net_energy_kWh"] / energy_scale
 
-    power_fig = px.line(calc, x="__time__", y="power_display", title=f"Power ({power_unit})").update_layout(
+    power_fig = px.line(df2, x="__time__", y="preview_power_display", title=f"Power ({power_unit})").update_layout(
         xaxis_title="Time",
         yaxis_title=power_unit,
         dragmode="select",
         selectdirection="h",
     )
     power_fig.update_traces(mode="lines+markers", marker={"size": 5})
+    power_min = float(df2["preview_power_display"].min())
+    power_max = float(df2["preview_power_display"].max())
+    if power_min == power_max:
+        power_min -= 1.0
+        power_max += 1.0
+    power_fig.add_selection(
+        x0=start_t,
+        x1=end_t,
+        y0=power_min,
+        y1=power_max,
+        line=dict(color="#ff9f43", width=2, dash="solid"),
+    )
 
     power_selection = st.plotly_chart(
         power_fig,
@@ -1104,20 +1119,17 @@ elif page == "Energy":
     last_applied_signature = st.session_state.get("energy_power_last_applied_signature")
 
     if len(selection_signature) >= 2 and selection_signature != last_applied_signature:
-        local_indices = sorted(set(int(point_index) for point_index in selection_signature))
-        selected_calc = calc.iloc[local_indices]
-        graph_start_i = int(selected_calc.index.min())
-        graph_end_i = min(len(df2) - 1, int(selected_calc.index.max()) + 1)
-        graph_window = (graph_start_i, max(graph_start_i + 1, graph_end_i))
+        graph_indices = sorted(set(int(point_index) for point_index in selection_signature))
+        graph_window = (graph_indices[0], graph_indices[-1])
+        st.session_state["energy_power_last_applied_signature"] = selection_signature
         if graph_window != st.session_state[energy_slider_key]:
             st.session_state[energy_slider_key] = graph_window
-        st.session_state["energy_power_last_applied_signature"] = selection_signature
-        st.rerun()
+            st.rerun()
 
     if not selection_signature and last_applied_signature:
         st.session_state["energy_power_last_applied_signature"] = ()
 
-    st.caption("You can also drag horizontally on the power chart to narrow the same time window.")
+    st.caption("The power chart and the slider share the same start/end time window.")
 
     st.plotly_chart(
         px.line(
