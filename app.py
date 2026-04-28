@@ -1040,6 +1040,51 @@ elif page == "Energy":
     end_t = df2.iloc[end_i]["__time__"]
     st.caption(f"Selected: {start_t} → {end_t}")
 
+    power_fig = px.line(df2, x="__time__", y="preview_power_display", title=f"Power ({power_unit})").update_layout(
+        xaxis_title="Time",
+        yaxis_title=power_unit,
+        dragmode="select",
+        selectdirection="h",
+    )
+    power_fig.update_traces(mode="lines+markers", marker={"size": 5})
+    power_min = float(df2["preview_power_display"].min())
+    power_max = float(df2["preview_power_display"].max())
+    if power_min == power_max:
+        power_min -= 1.0
+        power_max += 1.0
+    power_fig.add_selection(
+        x0=start_t,
+        x1=end_t,
+        y0=power_min,
+        y1=power_max,
+        line=dict(color="#ff9f43", width=2, dash="solid"),
+    )
+
+    power_selection = st.plotly_chart(
+        power_fig,
+        use_container_width=True,
+        key="energy_power_selector_chart",
+        on_select="rerun",
+        selection_mode="box",
+        config={"displaylogo": False, "modeBarButtonsToRemove": ["lasso2d"]},
+    )
+
+    selected_points = list(power_selection.selection.points) if power_selection else []
+    graph_indices = sorted(
+        {
+            int(point.get("point_index"))
+            for point in selected_points
+            if point.get("point_index") is not None
+        }
+    )
+    if len(graph_indices) >= 2:
+        graph_window = (graph_indices[0], graph_indices[-1])
+        if graph_window != (start_i, end_i):
+            st.session_state[energy_slider_pending_key] = graph_window
+            st.rerun()
+
+    st.caption("The power chart and the slider share the same start/end time window.")
+
     if start_t >= end_t:
         st.warning("Start must be before end.")
         st.stop()
@@ -1086,58 +1131,6 @@ elif page == "Energy":
     calc["cum_discharge_display"] = calc["cum_discharge_kWh"] / energy_scale
     calc["cum_charge_display"] = calc["cum_charge_kWh"] / energy_scale
     calc["net_energy_display"] = calc["net_energy_kWh"] / energy_scale
-
-    power_fig = px.line(df2, x="__time__", y="preview_power_display", title=f"Power ({power_unit})").update_layout(
-        xaxis_title="Time",
-        yaxis_title=power_unit,
-        dragmode="select",
-        selectdirection="h",
-    )
-    power_fig.update_traces(mode="lines+markers", marker={"size": 5})
-    power_min = float(df2["preview_power_display"].min())
-    power_max = float(df2["preview_power_display"].max())
-    if power_min == power_max:
-        power_min -= 1.0
-        power_max += 1.0
-    power_fig.add_selection(
-        x0=start_t,
-        x1=end_t,
-        y0=power_min,
-        y1=power_max,
-        line=dict(color="#ff9f43", width=2, dash="solid"),
-    )
-
-    power_selection = st.plotly_chart(
-        power_fig,
-        use_container_width=True,
-        key="energy_power_selector_chart",
-        on_select="rerun",
-        selection_mode="box",
-        config={"displaylogo": False, "modeBarButtonsToRemove": ["lasso2d"]},
-    )
-
-    selected_points = list(power_selection.selection.points) if power_selection else []
-    selection_signature = tuple(
-        point.get("point_index") for point in selected_points if point.get("point_index") is not None
-    )
-    last_applied_signature = st.session_state.get("energy_power_last_applied_signature")
-
-    if len(selection_signature) >= 2 and selection_signature != last_applied_signature:
-        graph_indices = sorted(set(int(point_index) for point_index in selection_signature))
-        graph_window = (graph_indices[0], graph_indices[-1])
-        st.session_state["energy_power_last_applied_signature"] = selection_signature
-        if graph_window != st.session_state[energy_slider_key]:
-            st.session_state[energy_slider_pending_key] = graph_window
-            st.rerun()
-
-    if not selection_signature and last_applied_signature:
-        st.session_state["energy_power_last_applied_signature"] = ()
-        full_window = (0, len(df2) - 1)
-        if st.session_state[energy_slider_key] != full_window:
-            st.session_state[energy_slider_pending_key] = full_window
-            st.rerun()
-
-    st.caption("The power chart and the slider share the same start/end time window.")
 
     st.plotly_chart(
         px.line(
