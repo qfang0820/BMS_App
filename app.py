@@ -24,7 +24,7 @@ ENERGY_SELECTOR_COMPONENT = components.component(
     name="energy_live_selector_v1",
     html="""
     <div class="energy-selector">
-      <div class="selection-summary" id="selection-summary">Zoom the chart to inspect a time window live. Double-click to reset.</div>
+      <div class="selection-summary" id="selection-summary">Drag on the chart to inspect data live. Double-click to reset.</div>
       <div class="metrics-grid">
         <div class="metric-card"><div class="metric-label">Energy OUT</div><div class="metric-value" id="metric-out">0.00</div></div>
         <div class="metric-card"><div class="metric-label">Energy IN</div><div class="metric-value" id="metric-in">0.00</div></div>
@@ -208,48 +208,6 @@ ENERGY_SELECTOR_COMPONENT = components.component(
         return `${(value / scale).toFixed(2)} ${unit}`;
       }
 
-      function parseRangeEdge(value) {
-        if (value === null || value === undefined) {
-          return null;
-        }
-        if (typeof value === "number" && Number.isFinite(value)) {
-          return value;
-        }
-        const parsed = new Date(value).getTime();
-        return Number.isFinite(parsed) ? parsed : null;
-      }
-
-      function indicesForRange(rangeStart, rangeEnd) {
-        if (!rows.length || rangeStart === null || rangeEnd === null) {
-          return [];
-        }
-        const start = Math.min(rangeStart, rangeEnd);
-        const end = Math.max(rangeStart, rangeEnd);
-        const indices = [];
-        for (let index = 0; index < rows.length; index += 1) {
-          const timeMs = Number(rows[index].time_ms);
-          if (Number.isFinite(timeMs) && timeMs >= start && timeMs <= end) {
-            indices.push(index);
-          }
-        }
-        return indices;
-      }
-
-      function layoutRangeToIndices(layoutUpdate) {
-        if (!layoutUpdate) {
-          return null;
-        }
-        if (layoutUpdate["xaxis.autorange"]) {
-          return [];
-        }
-        const start = parseRangeEdge(layoutUpdate["xaxis.range[0]"]);
-        const end = parseRangeEdge(layoutUpdate["xaxis.range[1]"]);
-        if (start === null || end === null) {
-          return null;
-        }
-        return indicesForRange(start, end);
-      }
-
       function setMetricText(element, text) {
         if (element) {
           element.textContent = text;
@@ -268,8 +226,8 @@ ENERGY_SELECTOR_COMPONENT = components.component(
         }
 
         const safeIndices = [...new Set(indices)].filter((index) => index >= 0 && index < rows.length).sort((a, b) => a - b);
-        const startIndex = safeIndices.length ? safeIndices[0] : 0;
-        const endIndex = safeIndices.length ? safeIndices[safeIndices.length - 1] : rows.length - 1;
+        const startIndex = safeIndices.length >= 2 ? safeIndices[0] : 0;
+        const endIndex = safeIndices.length >= 2 ? safeIndices[safeIndices.length - 1] : rows.length - 1;
         const windowRows = rows.slice(startIndex, endIndex + 1);
 
         if (windowRows.length < 2) {
@@ -326,8 +284,8 @@ ENERGY_SELECTOR_COMPONENT = components.component(
 
       function renderTable(indices, liveMode) {
         const safeIndices = [...new Set(indices)].filter((index) => index >= 0 && index < rows.length).sort((a, b) => a - b);
-        const startIndex = safeIndices.length ? safeIndices[0] : 0;
-        const endIndex = safeIndices.length ? safeIndices[safeIndices.length - 1] : rows.length - 1;
+        const startIndex = safeIndices.length >= 2 ? safeIndices[0] : 0;
+        const endIndex = safeIndices.length >= 2 ? safeIndices[safeIndices.length - 1] : rows.length - 1;
         const displayRows = rows.slice(startIndex, endIndex + 1);
         const maxRows = 150;
         const visibleRows = displayRows.slice(0, maxRows);
@@ -349,11 +307,11 @@ ENERGY_SELECTOR_COMPONENT = components.component(
           const td = document.createElement("td");
           td.colSpan = Math.max(columns.length, 1);
           td.className = "muted";
-          td.textContent = "No zoom window yet. Zoom the chart to preview rows live.";
+          td.textContent = "No points selected yet. Drag on the chart to preview rows live.";
           row.appendChild(td);
           bodyEl.appendChild(row);
           titleEl.textContent = "Selected Data";
-          summaryEl.textContent = "Zoom the chart to inspect a time window live. Double-click to reset.";
+          summaryEl.textContent = "Drag on the chart to inspect data live. Double-click to reset.";
           return;
         }
 
@@ -370,8 +328,8 @@ ENERGY_SELECTOR_COMPONENT = components.component(
         const firstRow = displayRows[0];
         const lastRow = displayRows[displayRows.length - 1];
         const suffix = displayRows.length > maxRows ? `, showing first ${maxRows}` : "";
-        titleEl.textContent = `${safeIndices.length ? "Zoomed Window Data" : "Full Window Data"} (${displayRows.length} points${suffix})`;
-        summaryEl.textContent = `${liveMode ? "Zooming" : safeIndices.length ? "Zoomed" : "Full"} window: ${firstRow.Time} → ${lastRow.Time}`;
+        titleEl.textContent = `${safeIndices.length >= 2 ? "Selected Window Data" : "Full Window Data"} (${displayRows.length} points${suffix})`;
+        summaryEl.textContent = `${liveMode ? "Selecting" : safeIndices.length >= 2 ? "Selected" : "Full"} window: ${firstRow.Time} → ${lastRow.Time}`;
       }
 
       function publishSelection(indices) {
@@ -397,66 +355,71 @@ ENERGY_SELECTOR_COMPONENT = components.component(
               color: "#7cc6ff",
               width: 2,
             },
+            selectedpoints: selectedIndicesFromPython.length ? selectedIndicesFromPython : null,
+            selected: {
+              marker: {
+                color: "#ff9f43",
+                size: 6,
+              },
+            },
+            unselected: {
+              marker: {
+                opacity: 0.35,
+              },
+              line: {
+                opacity: 0.45,
+              },
+            },
             hovertemplate: `Time: %{x}<br>Power: %{y:.2f} ${powerUnit}<extra></extra>`,
           };
 
           const layout = {
-            title: { text: "Energy Window Zoom", font: { color: "#ffffff" } },
-            dragmode: "zoom",
+            title: { text: "Select Energy Window", font: { color: "#ffffff" } },
+            dragmode: "select",
             paper_bgcolor: "rgba(0,0,0,0)",
             plot_bgcolor: "rgba(0,0,0,0)",
             margin: { l: 50, r: 20, t: 50, b: 50 },
             xaxis: {
               title: { text: "Time" },
-              rangeslider: { visible: true },
               color: "#d5d9e0",
               gridcolor: "rgba(120, 130, 150, 0.22)",
             },
             yaxis: {
               title: { text: powerUnit },
-              fixedrange: true,
               color: "#d5d9e0",
               gridcolor: "rgba(120, 130, 150, 0.22)",
             },
           };
 
-          if (selectedIndicesFromPython.length) {
-            layout.xaxis.range = [
-              rows[selectedIndicesFromPython[0]].Time,
-              rows[selectedIndicesFromPython[selectedIndicesFromPython.length - 1]].Time,
-            ];
-          }
-
           const config = {
             responsive: true,
             displaylogo: false,
-            scrollZoom: true,
-            doubleClick: "reset+autosize",
-            modeBarButtonsToRemove: ["select2d", "lasso2d"],
+            modeBarButtonsToRemove: ["lasso2d"],
           };
 
           Plotly.react(chartDiv, [trace], layout, config);
           renderTable(selectedIndicesFromPython, false);
 
           if (typeof chartDiv.removeAllListeners === "function") {
-            chartDiv.removeAllListeners("plotly_relayouting");
-            chartDiv.removeAllListeners("plotly_relayout");
+            chartDiv.removeAllListeners("plotly_selecting");
+            chartDiv.removeAllListeners("plotly_selected");
+            chartDiv.removeAllListeners("plotly_deselect");
             chartDiv.removeAllListeners("plotly_doubleclick");
           }
 
-          chartDiv.on("plotly_relayouting", (eventData) => {
-            const indices = layoutRangeToIndices(eventData);
-            if (indices !== null) {
-              renderTable(indices, true);
-            }
+          chartDiv.on("plotly_selecting", (eventData) => {
+            renderTable(uniqueSortedIndices(eventData?.points), true);
           });
 
-          chartDiv.on("plotly_relayout", (eventData) => {
-            const indices = layoutRangeToIndices(eventData);
-            if (indices !== null) {
-              renderTable(indices, false);
-              publishSelection(indices);
-            }
+          chartDiv.on("plotly_selected", (eventData) => {
+            const indices = uniqueSortedIndices(eventData?.points);
+            renderTable(indices, false);
+            publishSelection(indices);
+          });
+
+          chartDiv.on("plotly_deselect", () => {
+            renderTable([], false);
+            publishSelection([]);
           });
 
           chartDiv.on("plotly_doubleclick", () => {
@@ -1133,7 +1096,7 @@ elif page == "Energy":
     start_t = df2.iloc[start_i]["__time__"]
     end_t = df2.iloc[end_i]["__time__"]
     st.caption(
-        "Zoom the chart or use the time slider to choose the analysis window. Double-click the chart to reset. "
+        "Box-select points on the chart to choose the analysis window. Double-click the chart to reset. "
         f"Current window: {start_t} → {end_t}"
     )
 
