@@ -6,6 +6,19 @@ import plotly.express as px
 st.set_page_config(page_title="BMS Analyzer", layout="wide")
 st.title("BMS Analyzer (Template-Compatible)")
 
+SOURCE_REQUIRED_COLUMNS = ["时间", "堆电压(0.1V)", "堆电流(0.1A)", "堆SOC(0.1%)"]
+COLUMN_ALIASES = {
+    "时间": "Time",
+    "堆电压(0.1V)": "Stack voltage",
+    "堆电流(0.1A)": "Stack current",
+    "堆SOC(0.1%)": "SOC",
+    "序号": "Sequence",
+    "堆最高电压": "MAX CELL",
+    "堆最高电压位置": "MAX CELL POS",
+    "堆最低电压": "MIN CELL",
+    "堆最低电压位置": "MIN CELL POS",
+}
+
 # =========================
 # Helpers
 # =========================
@@ -36,6 +49,11 @@ def read_any_table(uploaded_file) -> pd.DataFrame:
     except Exception:
         uploaded_file.seek(0)
         return pd.read_csv(uploaded_file, sep=";", engine="python", encoding_errors="ignore")
+
+
+def normalize_bms_columns(df: pd.DataFrame) -> pd.DataFrame:
+    aliases = {source: target for source, target in COLUMN_ALIASES.items() if source in df.columns}
+    return df.rename(columns=aliases)
 
 
 def compute_energy(
@@ -98,7 +116,7 @@ max_gap_seconds = None if max_gap == 0 else float(max_gap)
 page = st.sidebar.radio("Page", ["Overview", "Energy"], index=0)
 
 # =========================
-# Load + parse BMS (ONLY 3 mandatory: Stack voltage/current/SOC)
+# Load + parse BMS
 # =========================
 bms_df = None
 bms_error = None
@@ -114,9 +132,7 @@ if bms_file is not None:
         else:
             df.columns = df.columns.astype(str).str.strip()
 
-            # Only these are mandatory (Time is still required to do time series/energy)
-            required = ["Time", "Stack voltage", "Stack current", "SOC"]
-            missing = [c for c in required if c not in df.columns]
+            missing = [c for c in SOURCE_REQUIRED_COLUMNS if c not in df.columns]
             if missing:
                 bms_error = (
                     "❌ Missing required columns:\n"
@@ -125,8 +141,10 @@ if bms_file is not None:
                     + ", ".join(df.columns)
                 )
             else:
+                df = normalize_bms_columns(df)
+
                 # parse time (handles '2026/2/27 0:03' etc.)
-                df["__time__"] = pd.to_datetime(df["Time"], errors="coerce", infer_datetime_format=True)
+                df["__time__"] = pd.to_datetime(df["Time"], errors="coerce")
                 df = df.dropna(subset=["__time__"]).sort_values("__time__")
 
                 # parse numeric for required
@@ -134,7 +152,7 @@ if bms_file is not None:
                     df[col] = clean_numeric_series(df[col])
 
                 # parse numeric for optional if they exist
-                optional_cols = ["MAX CELL", "MIN CELL", "2nd MAX CELL", "2nd MIN CELL"]
+                optional_cols = ["Sequence", "MAX CELL", "MAX CELL POS", "MIN CELL", "MIN CELL POS"]
                 for col in optional_cols:
                     if col in df.columns:
                         df[col] = clean_numeric_series(df[col])
@@ -148,10 +166,6 @@ if bms_file is not None:
                         df["MAX CELL"] = df["MAX CELL"] / 1000.0
                     if "MIN CELL" in df.columns:
                         df["MIN CELL"] = df["MIN CELL"] / 1000.0
-                    if "2nd MAX CELL" in df.columns:
-                        df["2nd MAX CELL"] = df["2nd MAX CELL"] / 1000.0
-                    if "2nd MIN CELL" in df.columns:
-                        df["2nd MIN CELL"] = df["2nd MIN CELL"] / 1000.0
 
                 # Only drop rows missing the 3 mandatory numeric fields
                 df = df.dropna(subset=["Stack voltage", "Stack current", "SOC"])
@@ -170,7 +184,7 @@ if bms_file is not None:
 # =========================
 if bms_df is None:
     if bms_file is None:
-        st.info("Upload your BMS file (with Time, Stack voltage, Stack current, SOC).")
+        st.info("Upload your BMS file (with 时间, 堆电压(0.1V), 堆电流(0.1A), 堆SOC(0.1%)).")
     else:
         st.error(bms_error if bms_error else "❌ Failed to load.")
     st.stop()
@@ -215,10 +229,6 @@ if page == "Overview":
         cell_series.append("MIN CELL")
     if "MAX CELL" in df.columns and df["MAX CELL"].notna().any():
         cell_series.append("MAX CELL")
-    if "2nd MIN CELL" in df.columns and df["2nd MIN CELL"].notna().any():
-        cell_series.append("2nd MIN CELL")
-    if "2nd MAX CELL" in df.columns and df["2nd MAX CELL"].notna().any():
-        cell_series.append("2nd MAX CELL")
 
     if cell_series:
         st.plotly_chart(
@@ -254,7 +264,7 @@ if page == "Overview":
         st.write("Rows:", len(df))
         st.write("Time range:", df["__time__"].min(), "→", df["__time__"].max())
         show_cols = ["Time", "__time__", "Stack voltage", "Stack current", "SOC"]
-        for c in ["MAX CELL", "MIN CELL", "2nd MAX CELL", "2nd MIN CELL", "cell_delta"]:
+        for c in ["Sequence", "MAX CELL", "MAX CELL POS", "MIN CELL", "MIN CELL POS", "cell_delta"]:
             if c in df.columns:
                 show_cols.append(c)
         st.dataframe(df[show_cols].head(50))
