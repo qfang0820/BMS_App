@@ -84,9 +84,14 @@ def compute_energy(
     dfe["dt_h"] = dfe["dt_s"] / 3600.0
     dfe["power_kW"] = (dfe[v_col] * dfe[i_col]) / 1000.0
     dfe["dE_kWh"] = dfe["power_kW"] * dfe["dt_h"]
+    dfe["discharge_kWh"] = dfe["dE_kWh"].clip(lower=0)
+    dfe["charge_kWh"] = (-dfe["dE_kWh"]).clip(lower=0)
+    dfe["net_energy_kWh"] = dfe["dE_kWh"].cumsum()
+    dfe["cum_discharge_kWh"] = dfe["discharge_kWh"].cumsum()
+    dfe["cum_charge_kWh"] = dfe["charge_kWh"].cumsum()
 
-    e_out = float(dfe.loc[dfe["power_kW"] > 0, "dE_kWh"].sum())
-    e_in = float(-dfe.loc[dfe["power_kW"] < 0, "dE_kWh"].sum())
+    e_out = float(dfe["discharge_kWh"].sum())
+    e_in = float(dfe["charge_kWh"].sum())
     e_net = e_out - e_in
     return dfe, e_out, e_in, e_net
 
@@ -296,10 +301,22 @@ elif page == "Energy":
         win, "__time__", "Stack voltage", "Stack current", max_gap_seconds=max_gap_seconds
     )
 
-    a, b, c = st.columns(3)
+    if calc.empty:
+        st.warning("Not enough valid intervals to compute energy.")
+        st.stop()
+
+    duration_h = float(calc["dt_h"].sum())
+    avg_power_kw = float(calc["power_kW"].mean())
+    peak_discharge_kw = float(calc["power_kW"].clip(lower=0).max())
+    peak_charge_kw = float(calc["power_kW"].clip(upper=0).abs().max())
+
+    a, b, c, d, e, f = st.columns(6)
     a.metric("Energy OUT (discharge)", f"{e_out:.2f} kWh")
     b.metric("Energy IN (charge)", f"{e_in:.2f} kWh")
     c.metric("Net (OUT - IN)", f"{e_net:.2f} kWh")
+    d.metric("Window duration", f"{duration_h:.2f} h")
+    e.metric("Average power", f"{avg_power_kw:.2f} kW")
+    f.metric("Peak discharge / charge", f"{peak_discharge_kw:.2f} / {peak_charge_kw:.2f} kW")
 
     st.plotly_chart(
         px.line(calc, x="__time__", y="power_kW", title="Power (kW)").update_layout(
@@ -308,5 +325,29 @@ elif page == "Energy":
         use_container_width=True,
     )
 
+    st.plotly_chart(
+        px.line(
+            calc,
+            x="__time__",
+            y=["cum_discharge_kWh", "cum_charge_kWh", "net_energy_kWh"],
+            title="Cumulative Energy",
+        ).update_layout(xaxis_title="Time", yaxis_title="kWh"),
+        use_container_width=True,
+    )
+
     with st.expander("Energy calculation table (first 200 rows)"):
-        st.dataframe(calc[["__time__", "Stack voltage", "Stack current", "power_kW", "dt_h", "dE_kWh"]].head(200))
+        st.dataframe(
+            calc[
+                [
+                    "__time__",
+                    "Stack voltage",
+                    "Stack current",
+                    "power_kW",
+                    "dt_h",
+                    "dE_kWh",
+                    "cum_discharge_kWh",
+                    "cum_charge_kWh",
+                    "net_energy_kWh",
+                ]
+            ].head(200)
+        )
