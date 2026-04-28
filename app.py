@@ -282,11 +282,44 @@ elif page == "Energy":
         st.warning("Not enough points to compute energy.")
         st.stop()
 
-    # Fast index slider (handles duplicate timestamps)
-    start_i, end_i = st.slider("Select window (index-based)", 0, len(df2) - 1, (0, len(df2) - 1))
+    df2["preview_power_kW"] = (df2["Stack voltage"] * df2["Stack current"]) / 1000.0
+    selection_fig = px.line(
+        df2,
+        x="__time__",
+        y="preview_power_kW",
+        title="Select Energy Window",
+        markers=True,
+    ).update_layout(
+        xaxis_title="Time",
+        yaxis_title="kW",
+        dragmode="select",
+    )
+    selection_fig.update_traces(marker={"size": 5})
+    selection_event = st.plotly_chart(
+        selection_fig,
+        use_container_width=True,
+        key="energy_window_selector",
+        on_select="rerun",
+        selection_mode=("box",),
+    )
+
+    selected_indices = []
+    if selection_event and "selection" in selection_event:
+        selected_indices = sorted(selection_event["selection"].get("point_indices", []))
+
+    if len(selected_indices) >= 2:
+        start_i = selected_indices[0]
+        end_i = selected_indices[-1]
+    else:
+        start_i = 0
+        end_i = len(df2) - 1
+
     start_t = df2.iloc[start_i]["__time__"]
     end_t = df2.iloc[end_i]["__time__"]
-    st.caption(f"Selected: {start_t} → {end_t}")
+    st.caption(
+        "Box-select points on the chart to choose the analysis window. "
+        f"Current window: {start_t} → {end_t}"
+    )
 
     if start_t >= end_t:
         st.warning("Start must be before end.")
