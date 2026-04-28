@@ -1019,7 +1019,11 @@ elif page == "Energy":
     df2["preview_power_display"] = df2["preview_power_kW"] / power_scale
 
     energy_slider_key = "energy_window_slider"
-    current_window = st.session_state.get(energy_slider_key, (0, len(df2) - 1))
+    energy_slider_pending_key = "energy_window_slider_pending"
+    pending_window = st.session_state.pop(energy_slider_pending_key, None)
+    current_window = pending_window if pending_window is not None else st.session_state.get(
+        energy_slider_key, (0, len(df2) - 1)
+    )
     start_default = max(0, min(int(current_window[0]), len(df2) - 1))
     end_default = max(start_default, min(int(current_window[1]), len(df2) - 1))
     st.session_state[energy_slider_key] = (start_default, end_default)
@@ -1123,11 +1127,15 @@ elif page == "Energy":
         graph_window = (graph_indices[0], graph_indices[-1])
         st.session_state["energy_power_last_applied_signature"] = selection_signature
         if graph_window != st.session_state[energy_slider_key]:
-            st.session_state[energy_slider_key] = graph_window
+            st.session_state[energy_slider_pending_key] = graph_window
             st.rerun()
 
     if not selection_signature and last_applied_signature:
         st.session_state["energy_power_last_applied_signature"] = ()
+        full_window = (0, len(df2) - 1)
+        if st.session_state[energy_slider_key] != full_window:
+            st.session_state[energy_slider_pending_key] = full_window
+            st.rerun()
 
     st.caption("The power chart and the slider share the same start/end time window.")
 
