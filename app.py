@@ -24,14 +24,14 @@ ENERGY_SELECTOR_COMPONENT = components.component(
     name="energy_live_selector_v1",
     html="""
     <div class="energy-selector">
-      <div class="selection-summary" id="selection-summary">Drag on the chart to inspect data live.</div>
+      <div class="selection-summary" id="selection-summary">Zoom the chart to inspect a time window live. Double-click to reset.</div>
       <div class="metrics-grid">
-        <div class="metric-card"><div class="metric-label">Energy OUT</div><div class="metric-value" id="metric-out">0.00 kWh</div></div>
-        <div class="metric-card"><div class="metric-label">Energy IN</div><div class="metric-value" id="metric-in">0.00 kWh</div></div>
-        <div class="metric-card"><div class="metric-label">Net</div><div class="metric-value" id="metric-net">0.00 kWh</div></div>
+        <div class="metric-card"><div class="metric-label">Energy OUT</div><div class="metric-value" id="metric-out">0.00</div></div>
+        <div class="metric-card"><div class="metric-label">Energy IN</div><div class="metric-value" id="metric-in">0.00</div></div>
+        <div class="metric-card"><div class="metric-label">Net</div><div class="metric-value" id="metric-net">0.00</div></div>
         <div class="metric-card"><div class="metric-label">Window duration</div><div class="metric-value" id="metric-duration">0.00 h</div></div>
-        <div class="metric-card"><div class="metric-label">Average power</div><div class="metric-value" id="metric-avg-power">0.00 kW</div></div>
-        <div class="metric-card"><div class="metric-label">Peak discharge / charge</div><div class="metric-value" id="metric-peak">0.00 / 0.00 kW</div></div>
+        <div class="metric-card"><div class="metric-label">Average power</div><div class="metric-value" id="metric-avg-power">0.00</div></div>
+        <div class="metric-card"><div class="metric-label">Peak discharge / charge</div><div class="metric-value" id="metric-peak">0.00 / 0.00</div></div>
       </div>
       <div class="chart-wrap"><div id="energy-chart"></div></div>
       <div class="table-wrap">
@@ -198,7 +198,57 @@ ENERGY_SELECTOR_COMPONENT = components.component(
       const columns = data?.table_columns || [];
       const selectedIndicesFromPython = data?.selected_indices || [];
       const maxGapSeconds = data?.max_gap_seconds ?? null;
+      const powerScale = data?.power_scale ?? 1;
+      const powerUnit = data?.power_unit || "kW";
+      const energyScale = data?.energy_scale ?? 1;
+      const energyUnit = data?.energy_unit || "kWh";
       let destroyed = false;
+
+      function formatMetricValue(value, scale, unit) {
+        return `${(value / scale).toFixed(2)} ${unit}`;
+      }
+
+      function parseRangeEdge(value) {
+        if (value === null || value === undefined) {
+          return null;
+        }
+        if (typeof value === "number" && Number.isFinite(value)) {
+          return value;
+        }
+        const parsed = new Date(value).getTime();
+        return Number.isFinite(parsed) ? parsed : null;
+      }
+
+      function indicesForRange(rangeStart, rangeEnd) {
+        if (!rows.length || rangeStart === null || rangeEnd === null) {
+          return [];
+        }
+        const start = Math.min(rangeStart, rangeEnd);
+        const end = Math.max(rangeStart, rangeEnd);
+        const indices = [];
+        for (let index = 0; index < rows.length; index += 1) {
+          const timeMs = Number(rows[index].time_ms);
+          if (Number.isFinite(timeMs) && timeMs >= start && timeMs <= end) {
+            indices.push(index);
+          }
+        }
+        return indices;
+      }
+
+      function layoutRangeToIndices(layoutUpdate) {
+        if (!layoutUpdate) {
+          return null;
+        }
+        if (layoutUpdate["xaxis.autorange"]) {
+          return [];
+        }
+        const start = parseRangeEdge(layoutUpdate["xaxis.range[0]"]);
+        const end = parseRangeEdge(layoutUpdate["xaxis.range[1]"]);
+        if (start === null || end === null) {
+          return null;
+        }
+        return indicesForRange(start, end);
+      }
 
       function setMetricText(element, text) {
         if (element) {
@@ -208,27 +258,27 @@ ENERGY_SELECTOR_COMPONENT = components.component(
 
       function renderMetrics(indices) {
         if (!rows.length) {
-          setMetricText(metricOut, "0.00 kWh");
-          setMetricText(metricIn, "0.00 kWh");
-          setMetricText(metricNet, "0.00 kWh");
+          setMetricText(metricOut, formatMetricValue(0, energyScale, energyUnit));
+          setMetricText(metricIn, formatMetricValue(0, energyScale, energyUnit));
+          setMetricText(metricNet, formatMetricValue(0, energyScale, energyUnit));
           setMetricText(metricDuration, "0.00 h");
-          setMetricText(metricAvgPower, "0.00 kW");
-          setMetricText(metricPeak, "0.00 / 0.00 kW");
+          setMetricText(metricAvgPower, formatMetricValue(0, powerScale, powerUnit));
+          setMetricText(metricPeak, `${(0).toFixed(2)} / ${(0).toFixed(2)} ${powerUnit}`);
           return;
         }
 
         const safeIndices = [...new Set(indices)].filter((index) => index >= 0 && index < rows.length).sort((a, b) => a - b);
-        const startIndex = safeIndices.length >= 2 ? safeIndices[0] : 0;
-        const endIndex = safeIndices.length >= 2 ? safeIndices[safeIndices.length - 1] : rows.length - 1;
+        const startIndex = safeIndices.length ? safeIndices[0] : 0;
+        const endIndex = safeIndices.length ? safeIndices[safeIndices.length - 1] : rows.length - 1;
         const windowRows = rows.slice(startIndex, endIndex + 1);
 
         if (windowRows.length < 2) {
-          setMetricText(metricOut, "0.00 kWh");
-          setMetricText(metricIn, "0.00 kWh");
-          setMetricText(metricNet, "0.00 kWh");
+          setMetricText(metricOut, formatMetricValue(0, energyScale, energyUnit));
+          setMetricText(metricIn, formatMetricValue(0, energyScale, energyUnit));
+          setMetricText(metricNet, formatMetricValue(0, energyScale, energyUnit));
           setMetricText(metricDuration, "0.00 h");
-          setMetricText(metricAvgPower, "0.00 kW");
-          setMetricText(metricPeak, "0.00 / 0.00 kW");
+          setMetricText(metricAvgPower, formatMetricValue(0, powerScale, powerUnit));
+          setMetricText(metricPeak, `${(0).toFixed(2)} / ${(0).toFixed(2)} ${powerUnit}`);
           return;
         }
 
@@ -263,18 +313,21 @@ ENERGY_SELECTOR_COMPONENT = components.component(
         const peakDischarge = powers.length ? Math.max(...powers.map((value) => Math.max(value, 0))) : 0;
         const peakCharge = powers.length ? Math.max(...powers.map((value) => Math.max(-value, 0))) : 0;
 
-        setMetricText(metricOut, `${eOut.toFixed(2)} kWh`);
-        setMetricText(metricIn, `${eIn.toFixed(2)} kWh`);
-        setMetricText(metricNet, `${eNet.toFixed(2)} kWh`);
+        setMetricText(metricOut, formatMetricValue(eOut, energyScale, energyUnit));
+        setMetricText(metricIn, formatMetricValue(eIn, energyScale, energyUnit));
+        setMetricText(metricNet, formatMetricValue(eNet, energyScale, energyUnit));
         setMetricText(metricDuration, `${durationH.toFixed(2)} h`);
-        setMetricText(metricAvgPower, `${avgPower.toFixed(2)} kW`);
-        setMetricText(metricPeak, `${peakDischarge.toFixed(2)} / ${peakCharge.toFixed(2)} kW`);
+        setMetricText(metricAvgPower, formatMetricValue(avgPower, powerScale, powerUnit));
+        setMetricText(
+          metricPeak,
+          `${(peakDischarge / powerScale).toFixed(2)} / ${(peakCharge / powerScale).toFixed(2)} ${powerUnit}`
+        );
       }
 
       function renderTable(indices, liveMode) {
         const safeIndices = [...new Set(indices)].filter((index) => index >= 0 && index < rows.length).sort((a, b) => a - b);
-        const startIndex = safeIndices.length >= 2 ? safeIndices[0] : 0;
-        const endIndex = safeIndices.length >= 2 ? safeIndices[safeIndices.length - 1] : rows.length - 1;
+        const startIndex = safeIndices.length ? safeIndices[0] : 0;
+        const endIndex = safeIndices.length ? safeIndices[safeIndices.length - 1] : rows.length - 1;
         const displayRows = rows.slice(startIndex, endIndex + 1);
         const maxRows = 150;
         const visibleRows = displayRows.slice(0, maxRows);
@@ -296,11 +349,11 @@ ENERGY_SELECTOR_COMPONENT = components.component(
           const td = document.createElement("td");
           td.colSpan = Math.max(columns.length, 1);
           td.className = "muted";
-          td.textContent = "No points selected yet. Drag on the chart to preview rows live.";
+          td.textContent = "No zoom window yet. Zoom the chart to preview rows live.";
           row.appendChild(td);
           bodyEl.appendChild(row);
           titleEl.textContent = "Selected Data";
-          summaryEl.textContent = "Drag on the chart to inspect data live.";
+          summaryEl.textContent = "Zoom the chart to inspect a time window live. Double-click to reset.";
           return;
         }
 
@@ -317,8 +370,8 @@ ENERGY_SELECTOR_COMPONENT = components.component(
         const firstRow = displayRows[0];
         const lastRow = displayRows[displayRows.length - 1];
         const suffix = displayRows.length > maxRows ? `, showing first ${maxRows}` : "";
-        titleEl.textContent = `${safeIndices.length >= 2 ? "Selected Window Data" : "Full Window Data"} (${displayRows.length} points${suffix})`;
-        summaryEl.textContent = `${liveMode ? "Selecting" : safeIndices.length >= 2 ? "Selected" : "Full"} window: ${firstRow.Time} → ${lastRow.Time}`;
+        titleEl.textContent = `${safeIndices.length ? "Zoomed Window Data" : "Full Window Data"} (${displayRows.length} points${suffix})`;
+        summaryEl.textContent = `${liveMode ? "Zooming" : safeIndices.length ? "Zoomed" : "Full"} window: ${firstRow.Time} → ${lastRow.Time}`;
       }
 
       function publishSelection(indices) {
@@ -333,7 +386,7 @@ ENERGY_SELECTOR_COMPONENT = components.component(
 
           const trace = {
             x: rows.map((row) => row.Time),
-            y: rows.map((row) => row.preview_power_kW),
+            y: rows.map((row) => row.preview_power_display),
             mode: "lines+markers",
             type: "scatter",
             marker: {
@@ -344,71 +397,66 @@ ENERGY_SELECTOR_COMPONENT = components.component(
               color: "#7cc6ff",
               width: 2,
             },
-            selectedpoints: selectedIndicesFromPython.length ? selectedIndicesFromPython : null,
-            selected: {
-              marker: {
-                color: "#ff9f43",
-                size: 6,
-              },
-            },
-            unselected: {
-              marker: {
-                opacity: 0.35,
-              },
-              line: {
-                opacity: 0.45,
-              },
-            },
-            hovertemplate: "Time: %{x}<br>Power: %{y:.2f} kW<extra></extra>",
+            hovertemplate: `Time: %{x}<br>Power: %{y:.2f} ${powerUnit}<extra></extra>`,
           };
 
           const layout = {
-            title: { text: "Select Energy Window", font: { color: "#ffffff" } },
-            dragmode: "select",
+            title: { text: "Energy Window Zoom", font: { color: "#ffffff" } },
+            dragmode: "zoom",
             paper_bgcolor: "rgba(0,0,0,0)",
             plot_bgcolor: "rgba(0,0,0,0)",
             margin: { l: 50, r: 20, t: 50, b: 50 },
             xaxis: {
               title: { text: "Time" },
+              rangeslider: { visible: true },
               color: "#d5d9e0",
               gridcolor: "rgba(120, 130, 150, 0.22)",
             },
             yaxis: {
-              title: { text: "kW" },
+              title: { text: powerUnit },
+              fixedrange: true,
               color: "#d5d9e0",
               gridcolor: "rgba(120, 130, 150, 0.22)",
             },
           };
 
+          if (selectedIndicesFromPython.length) {
+            layout.xaxis.range = [
+              rows[selectedIndicesFromPython[0]].Time,
+              rows[selectedIndicesFromPython[selectedIndicesFromPython.length - 1]].Time,
+            ];
+          }
+
           const config = {
             responsive: true,
             displaylogo: false,
-            modeBarButtonsToRemove: ["lasso2d"],
+            scrollZoom: true,
+            doubleClick: "reset+autosize",
+            modeBarButtonsToRemove: ["select2d", "lasso2d"],
           };
 
           Plotly.react(chartDiv, [trace], layout, config);
           renderTable(selectedIndicesFromPython, false);
 
           if (typeof chartDiv.removeAllListeners === "function") {
-            chartDiv.removeAllListeners("plotly_selecting");
-            chartDiv.removeAllListeners("plotly_selected");
-            chartDiv.removeAllListeners("plotly_deselect");
+            chartDiv.removeAllListeners("plotly_relayouting");
+            chartDiv.removeAllListeners("plotly_relayout");
             chartDiv.removeAllListeners("plotly_doubleclick");
           }
 
-          chartDiv.on("plotly_selecting", (eventData) => {
-            renderTable(uniqueSortedIndices(eventData?.points), true);
+          chartDiv.on("plotly_relayouting", (eventData) => {
+            const indices = layoutRangeToIndices(eventData);
+            if (indices !== null) {
+              renderTable(indices, true);
+            }
           });
 
-          chartDiv.on("plotly_selected", (eventData) => {
-            const indices = uniqueSortedIndices(eventData?.points);
-            renderTable(indices, false);
-            publishSelection(indices);
-          });
-
-          chartDiv.on("plotly_deselect", () => {
-            renderTable([], false);
-            publishSelection([]);
+          chartDiv.on("plotly_relayout", (eventData) => {
+            const indices = layoutRangeToIndices(eventData);
+            if (indices !== null) {
+              renderTable(indices, false);
+              publishSelection(indices);
+            }
           });
 
           chartDiv.on("plotly_doubleclick", () => {
@@ -727,6 +775,12 @@ def get_component_state_value(key: str, field: str, default):
     return default
 
 
+def choose_display_unit(max_abs_value: float, base_unit: str, large_unit: str, threshold: float = 1000.0):
+    if max_abs_value >= threshold:
+        return threshold, large_unit
+    return 1.0, base_unit
+
+
 def render_live_overview_chart(
     source_df: pd.DataFrame,
     *,
@@ -998,6 +1052,8 @@ elif page == "Energy":
         st.stop()
 
     df2["preview_power_kW"] = (df2["Stack voltage"] * df2["Stack current"]) / 1000.0
+    power_scale, power_unit = choose_display_unit(float(df2["preview_power_kW"].abs().max()), "kW", "MW")
+    df2["preview_power_display"] = df2["preview_power_kW"] / power_scale
     component_key = "energy_live_selector"
     current_selected_indices = get_component_state_value(component_key, "selected_indices", [])
     table_columns = [
@@ -1005,7 +1061,7 @@ elif page == "Energy":
         {"key": "Stack voltage", "label": "Stack voltage"},
         {"key": "Stack current", "label": "Stack current"},
         {"key": "SOC", "label": "SOC"},
-        {"key": "preview_power_kW", "label": "Power (kW)"},
+        {"key": "preview_power_display", "label": f"Power ({power_unit})"},
     ]
     optional_table_columns = ["Sequence", "MAX CELL", "MAX CELL POS", "MIN CELL", "MIN CELL POS", "cell_delta"]
     existing_optional_table_columns = [column for column in optional_table_columns if column in df2.columns]
@@ -1014,12 +1070,38 @@ elif page == "Energy":
             table_columns.append({"key": column, "label": column})
 
     selector_df = df2[
-        ["__time__", "Time", "Stack voltage", "Stack current", "SOC", "preview_power_kW", *existing_optional_table_columns]
+        [
+            "__time__",
+            "Time",
+            "Stack voltage",
+            "Stack current",
+            "SOC",
+            "preview_power_kW",
+            "preview_power_display",
+            *existing_optional_table_columns,
+        ]
     ].copy()
     selector_df["Time"] = selector_df["__time__"].dt.strftime("%Y-%m-%d %H:%M:%S")
     selector_df["time_ms"] = (df2["__time__"].astype("int64") // 10**6).astype("int64")
     selector_df = selector_df.drop(columns="__time__")
     selector_df = selector_df.where(pd.notna(selector_df), None)
+
+    full_calc, full_e_out, full_e_in, full_e_net = compute_energy(
+        df2, "__time__", "Stack voltage", "Stack current", max_gap_seconds=max_gap_seconds
+    )
+    if full_calc.empty:
+        st.warning("Not enough valid intervals to compute energy.")
+        st.stop()
+
+    energy_abs_max = max(
+        full_e_out,
+        full_e_in,
+        abs(full_e_net),
+        float(full_calc["cum_discharge_kWh"].abs().max()),
+        float(full_calc["cum_charge_kWh"].abs().max()),
+        float(full_calc["net_energy_kWh"].abs().max()),
+    )
+    energy_scale, energy_unit = choose_display_unit(energy_abs_max, "kWh", "MWh")
 
     selection_result = ENERGY_SELECTOR_COMPONENT(
         data={
@@ -1027,6 +1109,10 @@ elif page == "Energy":
             "table_columns": table_columns,
             "selected_indices": current_selected_indices,
             "max_gap_seconds": max_gap_seconds,
+            "power_scale": power_scale,
+            "power_unit": power_unit,
+            "energy_scale": energy_scale,
+            "energy_unit": energy_unit,
         },
         default={"selected_indices": current_selected_indices},
         on_selected_indices_change=lambda: None,
@@ -1037,7 +1123,7 @@ elif page == "Energy":
 
     selected_indices = sorted((selection_result.selected_indices or []) if selection_result else [])
 
-    if len(selected_indices) >= 2:
+    if selected_indices:
         start_i = selected_indices[0]
         end_i = selected_indices[-1]
     else:
@@ -1047,12 +1133,12 @@ elif page == "Energy":
     start_t = df2.iloc[start_i]["__time__"]
     end_t = df2.iloc[end_i]["__time__"]
     st.caption(
-        "Box-select points on the chart to choose the analysis window. "
+        "Zoom the chart or use the time slider to choose the analysis window. Double-click the chart to reset. "
         f"Current window: {start_t} → {end_t}"
     )
 
     if start_t >= end_t:
-        st.warning("Start must be before end.")
+        st.warning("The current zoom window needs at least 2 time points.")
         st.stop()
 
     win = df2[(df2["__time__"] >= start_t) & (df2["__time__"] <= end_t)].copy()
@@ -1068,9 +1154,23 @@ elif page == "Energy":
         st.warning("Not enough valid intervals to compute energy.")
         st.stop()
 
+    window_energy_abs_max = max(
+        e_out,
+        e_in,
+        abs(e_net),
+        float(calc["cum_discharge_kWh"].abs().max()),
+        float(calc["cum_charge_kWh"].abs().max()),
+        float(calc["net_energy_kWh"].abs().max()),
+    )
+    energy_scale, energy_unit = choose_display_unit(max(energy_abs_max, window_energy_abs_max), "kWh", "MWh")
+    calc["power_display"] = calc["power_kW"] / power_scale
+    calc["cum_discharge_display"] = calc["cum_discharge_kWh"] / energy_scale
+    calc["cum_charge_display"] = calc["cum_charge_kWh"] / energy_scale
+    calc["net_energy_display"] = calc["net_energy_kWh"] / energy_scale
+
     st.plotly_chart(
-        px.line(calc, x="__time__", y="power_kW", title="Power (kW)").update_layout(
-            xaxis_title="Time", yaxis_title="kW"
+        px.line(calc, x="__time__", y="power_display", title=f"Power ({power_unit})").update_layout(
+            xaxis_title="Time", yaxis_title=power_unit
         ),
         use_container_width=True,
     )
@@ -1079,13 +1179,17 @@ elif page == "Energy":
         px.line(
             calc,
             x="__time__",
-            y=["cum_discharge_kWh", "cum_charge_kWh", "net_energy_kWh"],
-            title="Cumulative Energy",
-        ).update_layout(xaxis_title="Time", yaxis_title="kWh"),
+            y=["cum_discharge_display", "cum_charge_display", "net_energy_display"],
+            title=f"Cumulative Energy ({energy_unit})",
+        ).update_layout(
+            xaxis_title="Time",
+            yaxis_title=energy_unit,
+            legend_title_text="Series",
+        ),
         use_container_width=True,
     )
 
-    with st.expander("Energy calculation table (first 200 rows)"):
+    with st.expander("Energy calculation table (raw kW/kWh, first 200 rows)"):
         st.dataframe(
             calc[
                 [
