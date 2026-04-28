@@ -1014,94 +1014,14 @@ elif page == "Energy":
         st.warning("Not enough points to compute energy.")
         st.stop()
 
-    df2["preview_power_kW"] = (df2["Stack voltage"] * df2["Stack current"]) / 1000.0
-    power_scale, power_unit = choose_display_unit(float(df2["preview_power_kW"].abs().max()), "kW", "MW")
-    df2["preview_power_display"] = df2["preview_power_kW"] / power_scale
-    component_key = "energy_live_selector"
-    current_selected_indices = get_component_state_value(component_key, "selected_indices", [])
-    table_columns = [
-        {"key": "Time", "label": "Time"},
-        {"key": "Stack voltage", "label": "Stack voltage"},
-        {"key": "Stack current", "label": "Stack current"},
-        {"key": "SOC", "label": "SOC"},
-        {"key": "preview_power_display", "label": f"Power ({power_unit})"},
-    ]
-    optional_table_columns = ["Sequence", "MAX CELL", "MAX CELL POS", "MIN CELL", "MIN CELL POS", "cell_delta"]
-    existing_optional_table_columns = [column for column in optional_table_columns if column in df2.columns]
-    for column in optional_table_columns:
-        if column in df2.columns:
-            table_columns.append({"key": column, "label": column})
-
-    selector_df = df2[
-        [
-            "__time__",
-            "Time",
-            "Stack voltage",
-            "Stack current",
-            "SOC",
-            "preview_power_kW",
-            "preview_power_display",
-            *existing_optional_table_columns,
-        ]
-    ].copy()
-    selector_df["Time"] = selector_df["__time__"].dt.strftime("%Y-%m-%d %H:%M:%S")
-    selector_df["time_ms"] = (df2["__time__"].astype("int64") // 10**6).astype("int64")
-    selector_df = selector_df.drop(columns="__time__")
-    selector_df = selector_df.where(pd.notna(selector_df), None)
-
-    full_calc, full_e_out, full_e_in, full_e_net = compute_energy(
-        df2, "__time__", "Stack voltage", "Stack current", max_gap_seconds=max_gap_seconds
-    )
-    if full_calc.empty:
-        st.warning("Not enough valid intervals to compute energy.")
-        st.stop()
-
-    energy_abs_max = max(
-        full_e_out,
-        full_e_in,
-        abs(full_e_net),
-        float(full_calc["cum_discharge_kWh"].abs().max()),
-        float(full_calc["cum_charge_kWh"].abs().max()),
-        float(full_calc["net_energy_kWh"].abs().max()),
-    )
-    energy_scale, energy_unit = choose_display_unit(energy_abs_max, "kWh", "MWh")
-
-    selection_result = ENERGY_SELECTOR_COMPONENT(
-        data={
-            "rows": selector_df.to_dict("records"),
-            "table_columns": table_columns,
-            "selected_indices": current_selected_indices,
-            "max_gap_seconds": max_gap_seconds,
-            "power_scale": power_scale,
-            "power_unit": power_unit,
-            "energy_scale": energy_scale,
-            "energy_unit": energy_unit,
-        },
-        default={"selected_indices": current_selected_indices},
-        on_selected_indices_change=lambda: None,
-        key=component_key,
-        width="stretch",
-        height="content",
-    )
-
-    selected_indices = sorted((selection_result.selected_indices or []) if selection_result else [])
-
-    if selected_indices:
-        start_i = selected_indices[0]
-        end_i = selected_indices[-1]
-    else:
-        start_i = 0
-        end_i = len(df2) - 1
-
+    # Fast index slider (handles duplicate timestamps)
+    start_i, end_i = st.slider("Select window (index-based)", 0, len(df2) - 1, (0, len(df2) - 1))
     start_t = df2.iloc[start_i]["__time__"]
     end_t = df2.iloc[end_i]["__time__"]
-    st.caption(
-        "Box-select points on the chart to choose the analysis window. Double-click the chart to reset. "
-        f"Current window: {start_t} → {end_t}"
-    )
+    st.caption(f"Selected: {start_t} → {end_t}")
 
     if start_t >= end_t:
-        st.warning("The current zoom window needs at least 2 time points.")
+        st.warning("Start must be before end.")
         st.stop()
 
     win = df2[(df2["__time__"] >= start_t) & (df2["__time__"] <= end_t)].copy()
@@ -1117,7 +1037,8 @@ elif page == "Energy":
         st.warning("Not enough valid intervals to compute energy.")
         st.stop()
 
-    window_energy_abs_max = max(
+    power_scale, power_unit = choose_display_unit(float(calc["power_kW"].abs().max()), "kW", "MW")
+    energy_abs_max = max(
         e_out,
         e_in,
         abs(e_net),
@@ -1125,7 +1046,23 @@ elif page == "Energy":
         float(calc["cum_charge_kWh"].abs().max()),
         float(calc["net_energy_kWh"].abs().max()),
     )
-    energy_scale, energy_unit = choose_display_unit(max(energy_abs_max, window_energy_abs_max), "kWh", "MWh")
+    energy_scale, energy_unit = choose_display_unit(energy_abs_max, "kWh", "MWh")
+    duration_h = float(calc["dt_h"].sum())
+    avg_power_kw = float(calc["power_kW"].mean())
+    peak_discharge_kw = float(calc["power_kW"].clip(lower=0).max())
+    peak_charge_kw = float(calc["power_kW"].clip(upper=0).abs().max())
+
+    a, b, c, d, e, f = st.columns(6)
+    a.metric("Energy OUT (discharge)", f"{e_out / energy_scale:.2f} {energy_unit}")
+    b.metric("Energy IN (charge)", f"{e_in / energy_scale:.2f} {energy_unit}")
+    c.metric("Net (OUT - IN)", f"{e_net / energy_scale:.2f} {energy_unit}")
+    d.metric("Window duration", f"{duration_h:.2f} h")
+    e.metric("Average power", f"{avg_power_kw / power_scale:.2f} {power_unit}")
+    f.metric(
+        "Peak discharge / charge",
+        f"{peak_discharge_kw / power_scale:.2f} / {peak_charge_kw / power_scale:.2f} {power_unit}",
+    )
+
     calc["power_display"] = calc["power_kW"] / power_scale
     calc["cum_discharge_display"] = calc["cum_discharge_kWh"] / energy_scale
     calc["cum_charge_display"] = calc["cum_charge_kWh"] / energy_scale
