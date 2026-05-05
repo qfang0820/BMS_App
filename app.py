@@ -753,18 +753,24 @@ def prepare_cell_analysis_df(df: pd.DataFrame) -> pd.DataFrame:
     if not cell_columns:
         raise ValueError("No cell voltage columns like V1, V2, ... were found.")
 
-    work["Time"] = (
-        work["时间"]
+    meta_df = work.drop(columns=cell_columns).copy()
+    meta_df["Time"] = (
+        meta_df["时间"]
         .astype(str)
         .str.replace("_x0000_", "", regex=False)
         .str.strip()
     )
-    work["__time__"] = pd.to_datetime(work["Time"], errors="coerce")
-    work = work.dropna(subset=["__time__"]).copy()
-    work["Rack"] = work["Source.Name"].astype(str).map(extract_rack_label)
+    meta_df["__time__"] = pd.to_datetime(meta_df["Time"], errors="coerce")
+    meta_df = meta_df.dropna(subset=["__time__"]).copy()
+    meta_df["Rack"] = meta_df["Source.Name"].astype(str).map(extract_rack_label)
 
-    for column in cell_columns:
-        work[column] = clean_numeric_series(work[column])
+    cell_value_df = pd.concat(
+        [clean_numeric_series(work[column]).rename(column) for column in cell_columns],
+        axis=1,
+    )
+    cell_value_df = cell_value_df.loc[meta_df.index]
+
+    work = pd.concat([meta_df, cell_value_df], axis=1).copy()
 
     work = work.dropna(subset=cell_columns, how="all").sort_values(["Rack", "__time__"]).copy()
     if work.empty:
@@ -774,6 +780,7 @@ def prepare_cell_analysis_df(df: pd.DataFrame) -> pd.DataFrame:
     if max_abs_cell > 100:
         work[cell_columns] = work[cell_columns] / 1000.0
 
+    work = work.copy()
     cell_values = work[cell_columns]
     work = work.assign(
         **{
@@ -781,7 +788,7 @@ def prepare_cell_analysis_df(df: pd.DataFrame) -> pd.DataFrame:
             "Max Cell V": cell_values.max(axis=1),
             "Average Cell V": cell_values.mean(axis=1),
         }
-    )
+    ).copy()
     return work
 
 
@@ -1138,7 +1145,7 @@ elif page == "Energy":
 
     power_selection = st.plotly_chart(
         power_fig,
-        use_container_width=True,
+        width="stretch",
         key="energy_power_selector_chart",
         on_select="rerun",
         selection_mode="box",
@@ -1219,7 +1226,7 @@ elif page == "Energy":
             yaxis_title=energy_unit,
             legend_title_text="Series",
         ),
-        use_container_width=True,
+        width="stretch",
     )
 
     with st.expander("Energy calculation table (raw kW/kWh, first 200 rows)"):
@@ -1284,7 +1291,7 @@ elif page == "Cell Analysis":
             yaxis_title="Cell V",
             legend_title_text="Cell",
         ),
-        use_container_width=True,
+        width="stretch",
     )
 
     st.plotly_chart(
@@ -1298,7 +1305,7 @@ elif page == "Cell Analysis":
             yaxis_title="Cell V",
             legend_title_text="Series",
         ),
-        use_container_width=True,
+        width="stretch",
     )
 
     with st.expander("Cell Analysis table (first 200 rows)"):
