@@ -8,6 +8,7 @@ st.set_page_config(page_title="BMS Analyzer", layout="wide")
 st.title("BMS Analyzer (Template-Compatible)")
 
 SOURCE_REQUIRED_COLUMNS = ["时间", "堆电压(0.1V)", "堆电流(0.1A)", "堆SOC(0.1%)"]
+CELL_REQUIRED_COLUMNS = ["Source.Name", "时间"]
 COLUMN_ALIASES = {
     "时间": "Time",
     "堆电压(0.1V)": "Stack voltage",
@@ -19,6 +20,8 @@ COLUMN_ALIASES = {
     "堆最低电压": "MIN CELL",
     "堆最低电压位置": "MIN CELL POS",
 }
+
+CELL_SOURCE_RACK_PATTERN = r"RACK(\d{2})"
 
 ENERGY_SELECTOR_COMPONENT = components.component(
     name="energy_live_selector_v1",
@@ -725,6 +728,63 @@ def normalize_bms_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df.rename(columns=aliases)
 
 
+def get_cell_voltage_columns(df: pd.DataFrame) -> list[str]:
+    return [column for column in df.columns if str(column).startswith("V") and str(column)[1:].isdigit()]
+
+
+def extract_rack_label(source_name: str) -> str:
+    match = pd.Series([source_name]).astype(str).str.extract(CELL_SOURCE_RACK_PATTERN, expand=False).iloc[0]
+    if pd.isna(match):
+        return "Unknown Rack"
+    return f"Rack {int(match) + 1}"
+
+
+def prepare_cell_analysis_df(df: pd.DataFrame) -> pd.DataFrame:
+    work = df.copy()
+    work.columns = work.columns.astype(str).str.strip()
+    missing = [column for column in CELL_REQUIRED_COLUMNS if column not in work.columns]
+    if missing:
+        raise ValueError(
+            "Missing required columns for Cell Analysis: "
+            + ", ".join(missing)
+        )
+
+    cell_columns = get_cell_voltage_columns(work)
+    if not cell_columns:
+        raise ValueError("No cell voltage columns like V1, V2, ... were found.")
+
+    work["Time"] = (
+        work["时间"]
+        .astype(str)
+        .str.replace("_x0000_", "", regex=False)
+        .str.strip()
+    )
+    work["__time__"] = pd.to_datetime(work["Time"], errors="coerce")
+    work = work.dropna(subset=["__time__"]).copy()
+    work["Rack"] = work["Source.Name"].astype(str).map(extract_rack_label)
+
+    for column in cell_columns:
+        work[column] = clean_numeric_series(work[column])
+
+    work = work.dropna(subset=cell_columns, how="all").sort_values(["Rack", "__time__"]).copy()
+    if work.empty:
+        raise ValueError("No valid cell-voltage rows remain after parsing.")
+
+    max_abs_cell = float(work[cell_columns].abs().max().max())
+    if max_abs_cell > 100:
+        work[cell_columns] = work[cell_columns] / 1000.0
+
+    cell_values = work[cell_columns]
+    work = work.assign(
+        **{
+            "Min Cell V": cell_values.min(axis=1),
+            "Max Cell V": cell_values.max(axis=1),
+            "Average Cell V": cell_values.mean(axis=1),
+        }
+    )
+    return work
+
+
 def get_component_state_value(key: str, field: str, default):
     state = st.session_state.get(key)
     if state is None:
@@ -845,34 +905,31 @@ max_gap = st.sidebar.number_input(
 )
 max_gap_seconds = None if max_gap == 0 else float(max_gap)
 
-page = st.sidebar.radio("Page", ["Overview", "Energy"], index=0)
+page = st.sidebar.radio("Page", ["Overview", "Energy", "Cell Analysis"], index=0)
 
 # =========================
-# Load + parse BMS
+# Load + parse data
 # =========================
 bms_df = None
 bms_error = None
+cell_df = None
+cell_error = None
 
 if bms_file is not None:
     try:
         df = read_any_table(bms_file)
     except Exception as e:
         bms_error = f"❌ Error reading file: {e}"
+        cell_error = bms_error
     else:
         if df.empty:
             bms_error = "❌ File has no rows."
+            cell_error = bms_error
         else:
             df.columns = df.columns.astype(str).str.strip()
 
             missing = [c for c in SOURCE_REQUIRED_COLUMNS if c not in df.columns]
-            if missing:
-                bms_error = (
-                    "❌ Missing required columns:\n"
-                    + "\n".join(f"- {c}" for c in missing)
-                    + "\n\nColumns found:\n"
-                    + ", ".join(df.columns)
-                )
-            else:
+            if not missing:
                 df = normalize_bms_columns(df)
 
                 # parse time (handles '2026/2/27 0:03' etc.)
@@ -910,18 +967,37 @@ if bms_file is not None:
                     else:
                         df["cell_delta"] = np.nan
                     bms_df = df
+            else:
+                bms_error = (
+                    "❌ Missing required columns:\n"
+                    + "\n".join(f"- {c}" for c in missing)
+                    + "\n\nColumns found:\n"
+                    + ", ".join(df.columns)
+                )
+
+            try:
+                cell_df = prepare_cell_analysis_df(df)
+            except Exception as e:
+                cell_error = f"❌ Cell Analysis parse error: {e}"
 
 # =========================
 # UI
 # =========================
-if bms_df is None:
-    if bms_file is None:
-        st.info("Upload your BMS file (with 时间, 堆电压(0.1V), 堆电流(0.1A), 堆SOC(0.1%)).")
-    else:
-        st.error(bms_error if bms_error else "❌ Failed to load.")
-    st.stop()
-
-df = bms_df
+if page in {"Overview", "Energy"}:
+    if bms_df is None:
+        if bms_file is None:
+            st.info("Upload your BMS file (with 时间, 堆电压(0.1V), 堆电流(0.1A), 堆SOC(0.1%)).")
+        else:
+            st.error(bms_error if bms_error else "❌ Failed to load.")
+        st.stop()
+    df = bms_df
+else:
+    if cell_df is None:
+        if bms_file is None:
+            st.info("Upload your cell record file (with Source.Name, 时间, and V1...Vn columns).")
+        else:
+            st.error(cell_error if cell_error else "❌ Failed to load Cell Analysis data.")
+        st.stop()
 
 if page == "Overview":
     st.subheader("BMS Overview")
@@ -1162,3 +1238,69 @@ elif page == "Energy":
                 ]
             ].head(200)
         )
+
+elif page == "Cell Analysis":
+    st.subheader("Cell Analysis")
+
+    cell_data = cell_df.copy()
+    rack_order = sorted(
+        cell_data["Rack"].dropna().unique(),
+        key=lambda rack: int(str(rack).split()[-1]) if str(rack).startswith("Rack ") else 9999,
+    )
+    selected_rack = st.sidebar.selectbox("Cell Analysis Rack", rack_order, key="cell_analysis_rack")
+
+    rack_df = cell_data[cell_data["Rack"] == selected_rack].copy()
+    cell_columns = get_cell_voltage_columns(rack_df)
+    default_cell_count = min(8, len(cell_columns))
+    default_cells = cell_columns[:default_cell_count]
+    selected_cells = st.sidebar.multiselect(
+        "Cells to plot",
+        cell_columns,
+        default=default_cells,
+        key="cell_analysis_cells",
+    )
+
+    top1, top2, top3, top4 = st.columns(4)
+    top1.metric("Rack", selected_rack)
+    top2.metric("Samples", f"{len(rack_df)}")
+    top3.metric("Cells detected", f"{len(cell_columns)}")
+    top4.metric(
+        "Time range",
+        f"{rack_df['__time__'].min().strftime('%Y-%m-%d %H:%M:%S')} → {rack_df['__time__'].max().strftime('%H:%M:%S')}",
+    )
+
+    if not selected_cells:
+        st.warning("Select at least one cell column to draw the line chart.")
+        st.stop()
+
+    st.plotly_chart(
+        px.line(
+            rack_df,
+            x="__time__",
+            y=selected_cells,
+            title=f"{selected_rack} Cell Voltage Lines",
+        ).update_layout(
+            xaxis_title="Time",
+            yaxis_title="Cell V",
+            legend_title_text="Cell",
+        ),
+        use_container_width=True,
+    )
+
+    st.plotly_chart(
+        px.line(
+            rack_df,
+            x="__time__",
+            y=["Min Cell V", "Max Cell V", "Average Cell V"],
+            title=f"{selected_rack} Min / Max / Average Cell V",
+        ).update_layout(
+            xaxis_title="Time",
+            yaxis_title="Cell V",
+            legend_title_text="Series",
+        ),
+        use_container_width=True,
+    )
+
+    with st.expander("Cell Analysis table (first 200 rows)"):
+        preview_columns = ["Source.Name", "Time", "Rack", "Min Cell V", "Max Cell V", "Average Cell V", *selected_cells]
+        st.dataframe(rack_df[preview_columns].head(200))
