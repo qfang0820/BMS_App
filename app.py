@@ -22,6 +22,11 @@ COLUMN_ALIASES = {
 }
 
 CELL_SOURCE_RACK_PATTERN = r"RACK(\d{2})"
+CELL_ANALYSIS_MAX_PLOT_CELLS = 24
+CELL_ANALYSIS_MAX_PLOT_ROWS = 2000
+CELL_ANALYSIS_MAX_SUMMARY_ROWS = 3000
+CELL_ANALYSIS_MAX_TABLE_ROWS = 100
+CELL_ANALYSIS_MAX_TABLE_CELLS = 12
 
 ENERGY_SELECTOR_COMPONENT = components.component(
     name="energy_live_selector_v1",
@@ -811,6 +816,13 @@ def choose_display_unit(max_abs_value: float, base_unit: str, large_unit: str, t
     return 1.0, base_unit
 
 
+def downsample_rows(df: pd.DataFrame, max_rows: int) -> pd.DataFrame:
+    if len(df) <= max_rows:
+        return df
+    indices = np.linspace(0, len(df) - 1, max_rows, dtype=int)
+    return df.iloc[np.unique(indices)].copy()
+
+
 def render_live_overview_chart(
     source_df: pd.DataFrame,
     *,
@@ -1249,7 +1261,7 @@ elif page == "Energy":
 elif page == "Cell Analysis":
     st.subheader("Cell Analysis")
 
-    cell_data = cell_df.copy()
+    cell_data = cell_df
     rack_order = sorted(
         cell_data["Rack"].dropna().unique(),
         key=lambda rack: int(str(rack).split()[-1]) if str(rack).startswith("Rack ") else 9999,
@@ -1280,11 +1292,31 @@ elif page == "Cell Analysis":
         st.warning("Select at least one cell column to draw the line chart.")
         st.stop()
 
+    plotted_cells = selected_cells[:CELL_ANALYSIS_MAX_PLOT_CELLS]
+    if len(selected_cells) > CELL_ANALYSIS_MAX_PLOT_CELLS:
+        st.warning(
+            f"Showing the first {CELL_ANALYSIS_MAX_PLOT_CELLS} selected cells to keep the chart responsive."
+        )
+
+    line_chart_df = downsample_rows(
+        rack_df[["__time__", *plotted_cells]].copy(),
+        CELL_ANALYSIS_MAX_PLOT_ROWS,
+    )
+    summary_chart_df = downsample_rows(
+        rack_df[["__time__", "Min Cell V", "Max Cell V", "Average Cell V"]].copy(),
+        CELL_ANALYSIS_MAX_SUMMARY_ROWS,
+    )
+
+    if len(line_chart_df) < len(rack_df):
+        st.caption(
+            f"Cell voltage chart downsampled from {len(rack_df)} to {len(line_chart_df)} points per trace."
+        )
+
     st.plotly_chart(
         px.line(
-            rack_df,
+            line_chart_df,
             x="__time__",
-            y=selected_cells,
+            y=plotted_cells,
             title=f"{selected_rack} Cell Voltage Lines",
         ).update_layout(
             xaxis_title="Time",
@@ -1296,7 +1328,7 @@ elif page == "Cell Analysis":
 
     st.plotly_chart(
         px.line(
-            rack_df,
+            summary_chart_df,
             x="__time__",
             y=["Min Cell V", "Max Cell V", "Average Cell V"],
             title=f"{selected_rack} Min / Max / Average Cell V",
@@ -1308,6 +1340,11 @@ elif page == "Cell Analysis":
         width="stretch",
     )
 
-    with st.expander("Cell Analysis table (first 200 rows)"):
-        preview_columns = ["Source.Name", "Time", "Rack", "Min Cell V", "Max Cell V", "Average Cell V", *selected_cells]
-        st.dataframe(rack_df[preview_columns].head(200))
+    with st.expander(f"Cell Analysis table (first {CELL_ANALYSIS_MAX_TABLE_ROWS} rows)"):
+        preview_cells = selected_cells[:CELL_ANALYSIS_MAX_TABLE_CELLS]
+        preview_columns = ["Source.Name", "Time", "Rack", "Min Cell V", "Max Cell V", "Average Cell V", *preview_cells]
+        if len(selected_cells) > CELL_ANALYSIS_MAX_TABLE_CELLS:
+            st.caption(
+                f"Table shows the first {CELL_ANALYSIS_MAX_TABLE_CELLS} selected cells to limit browser payload."
+            )
+        st.dataframe(rack_df[preview_columns].head(CELL_ANALYSIS_MAX_TABLE_ROWS))
